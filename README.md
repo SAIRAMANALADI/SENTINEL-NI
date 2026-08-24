@@ -79,3 +79,26 @@ python -m pip install -r requirements.txt
 ```
 
 See [docs/PS_REQUIREMENT_MATRIX.md](docs/PS_REQUIREMENT_MATRIX.md) for requirement traceability and [docs/DECISIONS.md](docs/DECISIONS.md) for provisional architectural decisions.
+
+## What the Prototype Does
+
+The system observes recent network-state history and forecasts future attack-state behavior over multiple horizons. It uses 10-second states, a frozen K=5 LSTM development checkpoint, a validation-selected operating policy, and deterministic model-sensitivity explanations. The result is an offline Forecast Score and a Predictive warning/No predictive warning state—not an “attack detected” verdict.
+
+## Demo
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+Use **Run Demo** to execute the deterministic local sample through validation, inference, policy, forecasting, and explanation.
+
+## Run the Demo
+
+Install the project dependencies, then start the offline Streamlit dashboard:
+
+```bash
+python -m pip install -r requirements.txt
+streamlit run app/streamlit_app.py
+```
+
+Use **Run Demo** to execute the deterministic fixture at `data/samples/inference_demo_sequence.csv`, or upload a compatible 10-state sequence containing the approved 17 features, `timestamp`, and `capture_day` columns. The dashboard consumes `predict_network_state_sequence()` from `src/forecasting/inference.py`; it does not train models or implement preprocessing independently.

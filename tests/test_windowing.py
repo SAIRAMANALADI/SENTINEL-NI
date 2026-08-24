@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.forecasting.windowing import generate_temporal_windows
+from src.forecasting.windowing import build_sequences, generate_temporal_windows
 
 
 def _fixture() -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
@@ -53,3 +53,108 @@ def test_window_rejects_nonfinite_features() -> None:
         assert "non-finite" in str(exc)
     else:
         raise AssertionError("Expected non-finite feature validation failure")
+
+
+def _state_fixture() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    groups = [
+        ("train", "2018-02-14"),
+        ("train", "2018-02-21"),
+        ("validation", "2018-02-22"),
+    ]
+    value = 0
+    for split, day in groups:
+        for index in range(5):
+            rows.append(
+                {
+                    "f1": value,
+                    "f2": value + 100,
+                    "timestamp": pd.Timestamp(day) + pd.Timedelta(seconds=index * 10),
+                    "capture_day": day,
+                    "split": split,
+                    "future_attack_state": [1, 0, 1, 0, -1][index],
+                    "future_target_available": index < 4,
+                }
+            )
+            value += 1
+    return pd.DataFrame(rows)
+
+
+def test_build_sequences_preserves_pre_aligned_target_and_boundaries() -> None:
+    frame = _state_fixture()
+    result = build_sequences(
+        frame,
+        ["f1", "f2"],
+        "future_attack_state",
+        sequence_length=2,
+        forecast_horizon=1,
+    )
+
+    assert result.features.shape == (9, 2, 2)
+    assert result.targets.shape == (9,)
+    assert result.report["target_alignment"] == "future_attack_state is read from the final input row; no second shift"
+    assert result.report["cross_group_sequences"] is False
+    assert result.targets[0] == 0
+    assert result.input_end_positions[0] == result.target_positions[0]
+    assert result.groups.tolist()[:3] == ["2018-02-14"] * 3
+    assert result.splits.tolist()[:6] == ["train"] * 6
+
+
+def test_build_sequences_horizon_and_stride_for_current_state_target() -> None:
+    frame = _state_fixture().drop(columns=["future_target_available", "future_attack_state"])
+    frame["current_state_target"] = np.arange(len(frame), dtype="int8") + 100
+    result = build_sequences(
+        frame,
+        ["f1", "f2"],
+        "current_state_target",
+        sequence_length=2,
+        forecast_horizon=2,
+        stride=2,
+    )
+
+    assert result.features.shape == (3, 2, 2)
+    assert result.targets[0] == 103
+    assert result.target_positions[0] > result.input_end_positions[0]
+    assert result.report["target_alignment"] == "target is read forecast_horizon rows after the final input row"
+
+
+def test_build_sequences_empty_input_has_deterministic_shape() -> None:
+    frame = _state_fixture().iloc[0:0]
+    result = build_sequences(
+        frame,
+        ["f1", "f2"],
+        "future_attack_state",
+        sequence_length=3,
+        forecast_horizon=1,
+    )
+
+    assert result.features.shape == (0, 3, 2)
+    assert result.targets.shape == (0,)
+    assert result.report["sequence_count"] == 0
+
+
+def test_build_sequences_rejects_invalid_parameters_and_double_shift() -> None:
+    frame = _state_fixture()
+    for kwargs in (
+        {"sequence_length": 0, "forecast_horizon": 1},
+        {"sequence_length": 2, "forecast_horizon": 0},
+        {"sequence_length": 2, "forecast_horizon": 1, "stride": 0},
+        {"sequence_length": 2, "forecast_horizon": 2},
+    ):
+        try:
+            build_sequences(frame, ["f1", "f2"], "future_attack_state", **kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Expected invalid window parameter failure")
+
+
+def test_build_sequences_is_deterministic() -> None:
+    frame = _state_fixture().sample(frac=1.0, random_state=42).reset_index(drop=True)
+    first = build_sequences(frame, ["f1", "f2"], "future_attack_state", sequence_length=2, forecast_horizon=1)
+    second = build_sequences(frame, ["f1", "f2"], "future_attack_state", sequence_length=2, forecast_horizon=1)
+
+    assert np.array_equal(first.features, second.features)
+    assert np.array_equal(first.targets, second.targets)
+    assert np.array_equal(first.groups, second.groups)
+    assert np.array_equal(first.target_positions, second.target_positions)
