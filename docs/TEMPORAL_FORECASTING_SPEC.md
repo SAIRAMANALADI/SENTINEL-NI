@@ -2,103 +2,58 @@
 
 ## Status
 
-Design specification only. No hyperparameters, target definition, or model has been finalized, and no training is authorized by this document.
+Implemented V1 offline forecasting contract. The LSTM checkpoints are development models; no final architecture winner or calibrated probability claim is made.
 
-## 1. Network state definition
+## State and input
 
-One network state `S(t)` is a feature vector summarizing traffic observed during a fixed interval ending at forecast origin `t`. The MVP state should be aggregated at a documented scope, initially considered as:
-
-- whole selected scenario/network;
-- source-host or destination-host group; or
-- source/destination pair group.
-
-The scope is an experiment. It must be chosen only after checking the selected dataset’s topology and labels. A state must include the interval start/end, scenario identity as metadata, row/flow counts, numeric traffic statistics, and target provenance. Scenario identity is not a model feature by default.
-
-## 2. Traffic aggregation
-
-For candidate interval width `W`, assign a flow or packet event to the interval containing its authoritative start timestamp. Compute only information available at or before the interval end. Candidate aggregations include counts, bytes, packets, rates, durations, protocol proportions, port diversity, endpoint fan-out, directional ratios, and packet-statistic summaries when source data supports them.
-
-Incomplete flows, timezone inconsistencies, out-of-order events, and events spanning interval boundaries require an explicit policy and audit record.
-
-## 3. Candidate window-size experiments
-
-These are experiment candidates, not final hyperparameters:
-
-| Experiment dimension | Candidate values | Selection evidence |
-| --- | --- | --- |
-| Aggregation width `W` | 1 s, 10 s, 60 s, 5 min, 15 min | Label alignment, sample count, warning lead time, stability |
-| History length `L` | 3, 6, 12, 24 states | Validation performance and minimum history availability |
-| Forecast horizon `K` | 1, 3, 5 states | Official PS, operational usefulness, calibration |
-| Entity scope | Network, host group, endpoint pair | Leakage review and data sufficiency |
-
-The current YAML `forecast_horizon_k: 3` is a placeholder only.
-
-## 4. Historical sequence
-
-Given ordered states, the model input at origin `t` is:
+Each state is a whole-network flow-derived summary at a fixed 10-second interval. The active model consumes the last 10 states and exactly 17 numeric features in the order defined by `configs/state_feature_schema.yaml`.
 
 ```text
-[S(t-L+1), ..., S(t)]
+[S(t-90s), S(t-80s), ..., S(t)] -> future state scores
 ```
 
-The window builder must emit the source scenario, interval boundaries, input-state identifiers, target-state identifiers, and split assignment. Windows are created only after split boundaries or guard gaps are established.
+The window builder rejects missing, duplicate, non-monotonic, cross-date, and non-10-second timestamps. Windows are isolated by capture day and split.
 
-## 5. Prediction target
-
-The primary candidate target is a future attack-state indicator for each horizon step:
+## Target
 
 ```text
-y(t+h) = 1 if the audited target rule says an attack is present in the future interval
-         0 otherwise
+binary_attack_state(t) = 1 if the current state contains at least one non-Benign source flow
+future_attack_state(t) = binary_attack_state(t + 10 seconds)
 ```
 
-Alternative experiments may predict attack intensity, label distribution, or a structured future state. The target rule must specify whether “any attack,” attack proportion, or a particular class triggers `1`. The official PS may require a different target; until then the target is UNKNOWN and provisional.
+Terminal states without a future interval are unavailable and excluded from supervised windows. For K-step direct forecasting, the target vector is the next K current-state labels at +10s increments within the same capture day. K=1 is verified against the approved `future_attack_state` column.
 
-## 6. K-step representation
+## Implemented output contract
 
-The structured output is a list indexed by horizon:
-
-```python
+```json
 {
-    "origin": "timestamp or interval identifier",
-    "forecast": [
-        {"step": 1, "target_interval": "...", "probability": 0.0},
-        {"step": 2, "target_interval": "...", "probability": 0.0},
-    ],
+  "model_version": "LSTM-DEVELOPMENT-V1-direct-multistep-K5",
+  "reference_timestamp": "2018-02-22T01:01:30",
+  "forecast_horizon_seconds": 50,
+  "forecast": [
+    {"step": 1, "horizon_seconds": 10, "timestamp": "...", "score": 0.0, "warning": false},
+    {"step": 2, "horizon_seconds": 20, "timestamp": "...", "score": 0.0, "warning": false},
+    {"step": 3, "horizon_seconds": 30, "timestamp": "...", "score": 0.0, "warning": false},
+    {"step": 4, "horizon_seconds": 40, "timestamp": "...", "score": 0.0, "warning": false},
+    {"step": 5, "horizon_seconds": 50, "timestamp": "...", "score": 0.0, "warning": false}
+  ],
+  "operating_mode": "balanced",
+  "threshold": 0.19
 }
 ```
 
-Direct multi-output and recursive one-step forecasting are experiments. The implementation must record which strategy was used and must not imply that probabilities are calibrated until calibration is tested.
+`score` is the raw model output after sigmoid and is displayed as **Forecast Score**. It is not a calibrated probability, confidence, risk percentage, or uncertainty estimate. The thresholded state is **Predictive warning** or **No predictive warning**, not attack confirmation.
 
-## 7. Future attack probability
+## Checkpoints
 
-For a binary target, the probability at step `h` is intended to represent:
+| K | Checkpoint | Horizon | Output |
+|---:|---|---:|---|
+| 1 | `models/lstm_multistep_k1.pt` | +10s | one score |
+| 3 | `models/lstm_multistep_k3.pt` | +10s, +20s, +30s | three scores |
+| 5 | `models/lstm_multistep_k5.pt` | +10s through +50s | five scores |
 
-```text
-P(y(t+h) = 1 | S(t-L+1), ..., S(t))
-```
+The primary demo uses K=5. Checkpoint selection and threshold selection use validation only; the 28-Feb test day remains held out for final evaluation.
 
-It must be produced by a fitted model or baseline and evaluated on a time/scenario-separated holdout. Thresholded alerts are separate from probabilities. Calibration, class imbalance, false-positive burden, and confidence/uncertainty reporting require experiments.
+## Limitations
 
-## 8. Early-warning definition
-
-An alert qualifies as an early warning only if:
-
-1. the forecast origin precedes the first confirmed positive target interval;
-2. the alert is emitted at least one complete prediction interval before that interval, unless the PS defines another lead time;
-3. the alert is counted with its threshold, horizon, and false-positive context; and
-4. the target label was not used to construct the current state.
-
-Lead time, false alarms, missed attacks, and alert persistence must be reported together.
-
-## 9. Temporal splitting
-
-Preferred order:
-
-1. Hold out complete scenarios when multiple scenarios exist.
-2. Within the development scenarios, order by time and use earlier time for training and later time for validation.
-3. Keep a guard gap at least as large as the maximum feature/sequence dependency where justified.
-4. Construct windows without allowing source rows or future intervals to cross partitions.
-5. Use the final untouched scenario or final chronological block only once for final evaluation.
-
-If only one short scenario is available, report that the result is within-scenario temporal validation and not cross-scenario generalization. Random row splitting is prohibited for this forecasting design.
+The four-day dataset does not prove broad temporal generalization. Flow-derived completed-flow statistics do not establish packet-cutoff early warning. Packet-level enrichment, calibrated probabilities, causal explanations, and attack-stage attribution are outside this V1 contract.

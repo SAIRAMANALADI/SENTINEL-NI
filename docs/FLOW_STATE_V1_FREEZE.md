@@ -99,7 +99,7 @@ data/processed/states/test.parquet
 - duplicate `(capture_day, timestamp)` state keys: 0;
 - timestamps are chronological within each capture day;
 - split days are disjoint and complete-day based;
-- full test suite: 32 passed.
+- latest full test suite: 133 passed; current verification details are recorded in `results/FORENSIC_CLEANUP_REPORT.md`.
 
 ## Known packet-level gap and limitations
 

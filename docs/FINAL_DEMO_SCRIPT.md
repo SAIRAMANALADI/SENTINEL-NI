@@ -86,7 +86,7 @@ Open `http://localhost:8501` or the local URL shown by Streamlit. The determinis
 
 **Point at:** K=5 checkpoint, schema version, target version, Balanced mode, threshold, horizon, timing, and test status.
 
-**Say:** “The complete path is local and reproducible: 104 tests passed, and the UI consumes one stable inference API.”
+**Say:** “The complete path is local and reproducible: the latest local suite passed, and the UI consumes one stable inference API.”
 
 ## Closing sentence
 

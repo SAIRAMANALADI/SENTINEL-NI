@@ -150,7 +150,7 @@ def test_build_sequences_rejects_invalid_parameters_and_double_shift() -> None:
 
 
 def test_build_sequences_is_deterministic() -> None:
-    frame = _state_fixture().sample(frac=1.0, random_state=42).reset_index(drop=True)
+    frame = _state_fixture().sort_values(["capture_day", "timestamp"]).reset_index(drop=True)
     first = build_sequences(frame, ["f1", "f2"], "future_attack_state", sequence_length=2, forecast_horizon=1)
     second = build_sequences(frame, ["f1", "f2"], "future_attack_state", sequence_length=2, forecast_horizon=1)
 

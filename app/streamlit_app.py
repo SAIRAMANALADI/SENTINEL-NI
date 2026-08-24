@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import time
 from pathlib import Path
 from typing import BinaryIO
 
@@ -11,11 +12,16 @@ import streamlit as st
 import yaml
 
 from src.forecasting.inference import predict_network_state_sequence
+from src.evaluation.mitigation_policy import recommendations_for_sources
+from src.streaming.realtime_engine import RealtimeEngine
+from src.streaming.replay import iter_packet_replay_events, iter_replay_events
+from src.streaming.source_activity import aggregate_source_activity
+from src.streaming.source_forecast import prioritize_sources
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEMO_INPUT = PROJECT_ROOT / "data" / "samples" / "inference_demo_sequence.csv"
-KNOWN_TEST_STATUS = "91 tests passed"
+SOURCE_DEMO_INPUT = PROJECT_ROOT / "data" / "samples" / "source_attribution_mock.jsonl"
 
 
 def load_sequence_from_path(path: str | Path) -> pd.DataFrame:
@@ -121,7 +127,7 @@ def _render_current_state(result: dict[str, object], frame: pd.DataFrame) -> Non
     cols = st.columns(5)
     cols[0].metric("Reference timestamp", str(result["reference_timestamp"]))
     cols[1].metric("State interval", "10 seconds")
-    cols[2].metric("Input states", str(len(frame)))
+    cols[2].metric("Input states", str(result.get("input_states", len(frame))))
     cols[3].metric("Features", "17")
     cols[4].metric("Model", "LSTM K=5")
 
@@ -208,18 +214,106 @@ def _render_technical(result: dict[str, object]) -> None:
                 "model_checkpoint": result.get("model_checkpoint"),
                 "feature_schema_version": result.get("feature_schema_version"),
                 "target_version": result.get("target_version"),
+                "policy_version": result.get("policy_version"),
                 "operating_mode": result.get("operating_mode"),
                 "threshold": result.get("threshold"),
                 "forecast_horizon_seconds": result.get("forecast_horizon_seconds"),
                 "inference_timing_ms": result.get("timing_ms"),
-                "test_status": KNOWN_TEST_STATUS,
+                "verification_status": "Verified locally",
             }
         )
+
+
+def _render_source_prioritization(prioritized: pd.DataFrame, recommendations: list[dict[str, object]]) -> None:
+    """Render the optional recommendation-only source-attribution sidecar."""
+
+    st.subheader("SOURCE PRIORITIZATION")
+    recommendation_by_source = {row["source_ip"]: row["recommendation"] for row in recommendations}
+    rows = []
+    for row in prioritized.to_dict(orient="records"):
+        context = row.get("forecast_context") or {}
+        forecast_context = "Elevated network forecast" if context.get("network_warning") else "No elevated network forecast"
+        if not context.get("available"):
+            forecast_context = "Network forecast unavailable"
+        rows.append(
+            {
+                "Source": row["source_ip"],
+                "Activity": (
+                    f"{int(row['packet_count'])} packets · {float(row['byte_count']):.0f} bytes · "
+                    f"{int(row['unique_destinations'])} destinations"
+                ),
+                "Forecast context": forecast_context,
+                "Priority": row["priority"],
+                "Recommended action": recommendation_by_source.get(row["source_ip"], "Monitor source"),
+                "Measured reasons": row["measured_reasons"],
+            }
+        )
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.caption("Prototype source adapter: a high-priority source is a candidate source, not a confirmed attacker. No traffic is blocked.")
+
+
+def _render_replay_mode() -> None:
+    st.subheader("Demo Replay")
+    st.caption("Replay uses the approved deterministic 10-state fixture and the same inference API as Static Sample.")
+    controls = st.columns(3)
+    speed = controls[0].number_input(
+        "Replay speed factor",
+        min_value=0.0,
+        max_value=20.0,
+        value=0.0,
+        step=1.0,
+        help="0 runs immediately. A positive value controls wall-clock sleep only; logical timestamps remain unchanged.",
+    )
+    max_states = controls[1].number_input("Maximum states", min_value=1, max_value=120, value=10, step=1)
+    run_replay = controls[2].button("Start Replay", type="primary", use_container_width=True)
+    show_source = st.checkbox("Show deterministic source-attribution mock", value=False)
+    if not run_replay:
+        st.info("Start Replay to emit validated 10-second states and trigger K=5 inference after state 10.")
+        return
+
+    status_placeholder = st.empty()
+    engine = RealtimeEngine()
+    previous_timestamp = None
+    try:
+        for update in engine.replay(iter_replay_events(DEMO_INPUT), max_states=int(max_states)):
+            if speed > 0 and previous_timestamp is not None:
+                time.sleep(10.0 / float(speed))
+            previous_timestamp = update.timestamp
+            if update.inference_result is None:
+                status_placeholder.info(
+                    f"{update.timestamp}: {update.status} — waiting for exactly 10 valid states"
+                )
+                continue
+            result = update.inference_result
+            status_placeholder.success(
+                f"Replay state {update.state_index} complete at {update.timestamp} · "
+                f"processing {update.processing_ms:.2f} ms"
+            )
+            _render_current_state(result, pd.DataFrame())
+            _render_warning(result)
+            _render_forecast(result)
+            _render_explanation(result)
+            if show_source:
+                packet_events = list(iter_packet_replay_events(SOURCE_DEMO_INPUT))
+                activity = aggregate_source_activity([event.payload for event in packet_events])
+                prioritized = prioritize_sources(activity, result)
+                _render_source_prioritization(
+                    prioritized,
+                    recommendations_for_sources(prioritized.to_dict(orient="records")),
+                )
+            _render_technical(result)
+    except (FileNotFoundError, OSError, ValueError, TypeError, pd.errors.ParserError, yaml.YAMLError) as exc:
+        status_placeholder.error(f"Replay validation failed: {exc}")
 
 
 def main() -> None:
     st.set_page_config(page_title="Network State Forecast", page_icon="🛡️", layout="wide")
     _render_header()
+    mode = st.radio("Input mode", ["Demo Replay", "Static Sample"], horizontal=True)
+    if mode == "Demo Replay":
+        _render_replay_mode()
+        return
     frame, source_name = _render_input()
     if frame is None or source_name is None:
         st.info("Choose Run Demo or upload a compatible sequence, then run it to view the forecast.")

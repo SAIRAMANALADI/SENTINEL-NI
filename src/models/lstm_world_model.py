@@ -92,6 +92,7 @@ def save_checkpoint(
     best_epoch: int,
     best_validation_metric: float,
     training_metadata: dict[str, Any],
+    model_metadata: dict[str, Any] | None = None,
 ) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -107,6 +108,7 @@ def save_checkpoint(
             "best_epoch": int(best_epoch),
             "best_validation_metric": float(best_validation_metric),
             "training_metadata": training_metadata,
+            "model_metadata": dict(model_metadata or {}),
         },
         destination,
     )

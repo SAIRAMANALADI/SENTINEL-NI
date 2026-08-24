@@ -124,4 +124,4 @@ Validation command:
 python scripts/build_state_splits.py --input data/processed/cic_ids2018_network_states.parquet --split-report results/multiday_split_report.json
 ```
 
-The aggregation and split tests are part of the repository test suite. Current verification result: **32 passed**.
+The aggregation and split tests are part of the repository test suite. The latest verification result is recorded in `results/FORENSIC_CLEANUP_REPORT.md`.

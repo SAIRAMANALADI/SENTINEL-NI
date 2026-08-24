@@ -4,19 +4,20 @@ Welcome team.
 
 This repository is the engineering foundation for SIH26-26153, **AI Based Network Attack Forecasting from Network Traffic Data**.
 
-The intended system will ingest network traffic, convert it into a canonical feature table, construct temporal windows, forecast future network state and attack risk, map the result to an operational attack stage, and expose the result through an offline demo. This repository currently contains the foundation and interface contracts only.
+The implemented prototype ingests CSE-CIC-IDS2018 flow data, constructs 10-second network states, builds day-aware temporal windows, forecasts future observed attack-state behavior, applies a validation-selected operating policy, and exposes the result through an offline CLI and Streamlit demo.
 
 ## Current status
 
-Foundation scaffold in progress:
+Current verified state:
 
-- repository structure created;
-- provisional data, architecture, leakage, and requirement contracts documented;
-- lightweight configuration and package placeholders created;
-- smoke and project-structure tests provided;
-- no dataset, trained model, metrics, dashboard, or official SIH problem statement has been added yet.
+- CSE-CIC-IDS2018 four-day flow artifacts are locally acquired but excluded from Git;
+- 16,127 fixed 10-second network states with 17 flow-derived model features are available;
+- the approved target is `future_attack_state(t) = binary_attack_state(t + 10 seconds)` within the same `capture_day`;
+- train/validation/test days are 14-Feb + 21-Feb / 22-Feb / 28-Feb;
+- the frozen K=5 LSTM development checkpoint, preprocessing artifact, operating policy, CLI, and offline Streamlit dashboard are implemented;
+- packet-level PCAP enrichment remains blocked and is not fabricated.
 
-Fields and requirements that depend on the selected dataset or official SIH statement remain explicitly provisional. No results should be treated as valid until the data contract, labels, split policy, and evaluation protocol are approved.
+The authoritative current contracts are [docs/NETWORK_STATE_SPEC.md](docs/NETWORK_STATE_SPEC.md), [docs/TARGET_STATE_SPEC.md](docs/TARGET_STATE_SPEC.md), [docs/WORLD_MODEL_SPEC.md](docs/WORLD_MODEL_SPEC.md), and [docs/INFERENCE_CONTRACT.md](docs/INFERENCE_CONTRACT.md).
 
 ## Architecture
 
@@ -43,7 +44,7 @@ The training and inference paths are separated in [docs/ARCHITECTURE.md](docs/AR
 ```text
 data/       raw, processed, and small sample-data locations
 src/        ingestion, features, preprocessing, models, forecasting, MITRE, explainability
-app/        future offline dashboard
+app/        offline Streamlit dashboard
 configs/    versioned project configuration
 tests/      automated tests
 notebooks/  exploratory work kept separate from production code

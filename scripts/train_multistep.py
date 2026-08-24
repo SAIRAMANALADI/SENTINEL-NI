@@ -47,6 +47,10 @@ K_VALUES = (1, 3, 5)
 FORECAST_INTERVAL_SECONDS = 10
 THRESHOLDS = (0.30, 0.40, 0.50, 0.60, 0.70)
 RANDOM_SEED = 42
+TARGET_DEFINITION = (
+    "For step j in 1..K, target[j] is binary_attack_state(t + j * 10 seconds) "
+    "within the same capture_day; K=1 equals future_attack_state(t)."
+)
 
 DEFAULT_RESULTS = PROJECT_ROOT / "results" / "multistep_metrics.json"
 DEFAULT_K1_CONSISTENCY = PROJECT_ROOT / "results" / "K1_CONSISTENCY_CHECK.md"
@@ -275,7 +279,7 @@ def _run_one(
         batch_size=128,
         epochs=20,
         sequence_length=SEQUENCE_LENGTH,
-        forecast_horizon=1,
+        forecast_horizon=horizon,
         random_seed=RANDOM_SEED,
         device="cpu",
         output_size=horizon,
@@ -311,13 +315,28 @@ def _run_one(
     metadata = {
         "experiment": "LSTM-DEVELOPMENT-V1-direct-multistep",
         "development_model": True,
+        "model_version": f"LSTM-DEVELOPMENT-V1-direct-multistep-K{horizon}",
         "sequence_length": SEQUENCE_LENGTH,
         "forecast_horizon": horizon,
+        "forecast_horizon_steps": horizon,
+        "forecast_horizon_seconds": horizon * FORECAST_INTERVAL_SECONDS,
+        "state_interval_seconds": FORECAST_INTERVAL_SECONDS,
+        "capture_interval_seconds": FORECAST_INTERVAL_SECONDS,
+        "input_feature_count": len(feature_columns),
+        "feature_schema_version": schema_version,
+        "target_version": "docs/TARGET_STATE_SPEC.md",
+        "target_definition": TARGET_DEFINITION,
+        "train_split": EXPECTED_DAYS["train"],
+        "validation_split": EXPECTED_DAYS["validation"],
+        "test_split": EXPECTED_DAYS["test"],
+        "seed": RANDOM_SEED,
         "target_source_column": "binary_attack_state",
         "loss": "BCEWithLogitsLoss",
         "positive_weights": positive_weights.tolist(),
+        "positive_class_weights": positive_weights.tolist(),
         "selected_thresholds": selected_thresholds,
         "checkpoint_selection": "mean validation PR-AUC across forecast steps",
+        "checkpoint_selection_metric": "mean validation PR-AUC across forecast steps",
         "threshold_selection": "per-step validation F1",
         "threshold_selection_split": "validation",
         "test_used_for_selection": False,
@@ -338,6 +357,7 @@ def _run_one(
         training["best_epoch"],
         training["best_validation_metric"],
         metadata,
+        model_metadata=metadata,
     )
     _write_json(
         config_path,
@@ -348,6 +368,20 @@ def _run_one(
             "target_column": "future_attack_state",
             "target_source_column": "binary_attack_state",
             "target_version": "docs/TARGET_STATE_SPEC.md",
+            "model_version": metadata["model_version"],
+            "forecast_horizon_steps": metadata["forecast_horizon_steps"],
+            "forecast_horizon_seconds": metadata["forecast_horizon_seconds"],
+            "state_interval_seconds": metadata["state_interval_seconds"],
+            "capture_interval_seconds": metadata["capture_interval_seconds"],
+            "input_feature_count": metadata["input_feature_count"],
+            "target_definition": metadata["target_definition"],
+            "train_split": metadata["train_split"],
+            "validation_split": metadata["validation_split"],
+            "test_split": metadata["test_split"],
+            "seed": metadata["seed"],
+            "positive_class_weights": metadata["positive_class_weights"],
+            "threshold_selection_split": metadata["threshold_selection_split"],
+            "checkpoint_selection_metric": metadata["checkpoint_selection_metric"],
             "feature_schema_version": schema_version,
             "loss": "BCEWithLogitsLoss",
             "positive_weights": positive_weights.tolist(),

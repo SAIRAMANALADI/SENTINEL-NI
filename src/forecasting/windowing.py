@@ -165,6 +165,34 @@ def _validate_positive_integer(name: str, value: int) -> None:
         raise ValueError(f"{name} must be a positive integer")
 
 
+def _validate_fixed_state_cadence(
+    working: pd.DataFrame,
+    grouping_columns: list[str],
+    group_column: str,
+    interval_seconds: int,
+) -> None:
+    """Reject state rows that are not ordered at the approved fixed cadence."""
+
+    _validate_positive_integer("interval_seconds", interval_seconds)
+    if working.empty:
+        return
+    expected_delta = pd.Timedelta(seconds=int(interval_seconds))
+    if group_column == "capture_day":
+        capture_days = working[group_column].astype("string")
+        timestamp_dates = working["__timestamp"].dt.strftime("%Y-%m-%d")
+        if timestamp_dates.ne(capture_days).any():
+            raise ValueError("timestamp dates must match capture_day for every state")
+
+    for key, group in working.groupby(grouping_columns, sort=False, dropna=False):
+        deltas = group["__timestamp"].diff().dropna()
+        if (deltas <= pd.Timedelta(0)).any():
+            raise ValueError(f"timestamps must be strictly increasing within group {key!r}")
+        if not (deltas == expected_delta).all():
+            raise ValueError(
+                f"timestamps must be exactly {interval_seconds} seconds apart within group {key!r}"
+            )
+
+
 def build_sequences(
     dataframe: pd.DataFrame,
     feature_columns: list[str],
@@ -173,6 +201,7 @@ def build_sequences(
     forecast_horizon: int,
     stride: int = 1,
     group_column: str = "capture_day",
+    interval_seconds: int = 10,
 ) -> SequenceBatch:
     """Build chronological, group-isolated sequences from state rows.
 
@@ -196,6 +225,7 @@ def build_sequences(
     _validate_positive_integer("sequence_length", sequence_length)
     _validate_positive_integer("forecast_horizon", forecast_horizon)
     _validate_positive_integer("stride", stride)
+    _validate_positive_integer("interval_seconds", interval_seconds)
     if not isinstance(dataframe, pd.DataFrame):
         raise TypeError("dataframe must be a pandas DataFrame")
     if not feature_columns:
@@ -229,6 +259,7 @@ def build_sequences(
                 "sequence_length": int(sequence_length),
                 "forecast_horizon": int(forecast_horizon),
                 "stride": int(stride),
+                "interval_seconds": int(interval_seconds),
                 "feature_dimension": feature_count,
                 "sequence_count": 0,
                 "target_alignment": "pre-aligned final input row" if target_column == "future_attack_state" else "future row offset",
@@ -257,6 +288,7 @@ def build_sequences(
         if working["__split_value"].isna().any():
             raise ValueError("split contains missing values")
         grouping_columns.insert(0, "__split_value")
+    _validate_fixed_state_cadence(working, grouping_columns, group_column, interval_seconds)
     working = working.sort_values(
         grouping_columns + ["__timestamp", "__input_position"],
         kind="mergesort",
@@ -326,6 +358,7 @@ def build_sequences(
         "sequence_length": int(sequence_length),
         "forecast_horizon": int(forecast_horizon),
         "stride": int(stride),
+        "interval_seconds": int(interval_seconds),
         "feature_dimension": feature_count,
         "sequence_count": int(len(output_targets)),
         "group_column": group_column,
@@ -360,6 +393,7 @@ def build_multistep_sequences(
     forecast_horizon: int,
     stride: int = 1,
     group_column: str = "capture_day",
+    interval_seconds: int = 10,
 ) -> MultiStepSequenceBatch:
     """Build direct multi-step targets without shifting the approved target twice.
 
@@ -387,6 +421,7 @@ def build_multistep_sequences(
     _validate_positive_integer("sequence_length", sequence_length)
     _validate_positive_integer("forecast_horizon", forecast_horizon)
     _validate_positive_integer("stride", stride)
+    _validate_positive_integer("interval_seconds", interval_seconds)
     if not isinstance(dataframe, pd.DataFrame):
         raise TypeError("dataframe must be a pandas DataFrame")
     if not feature_columns:
@@ -420,6 +455,7 @@ def build_multistep_sequences(
                 "sequence_length": int(sequence_length),
                 "forecast_horizon": int(forecast_horizon),
                 "stride": int(stride),
+                "interval_seconds": int(interval_seconds),
                 "feature_dimension": feature_count,
                 "target_dimension": int(forecast_horizon),
                 "sequence_count": 0,
@@ -453,6 +489,7 @@ def build_multistep_sequences(
         if working["__split_value"].isna().any():
             raise ValueError("split contains missing values")
         grouping_columns.insert(0, "__split_value")
+    _validate_fixed_state_cadence(working, grouping_columns, group_column, interval_seconds)
     working = working.sort_values(
         grouping_columns + ["__timestamp", "__input_position"],
         kind="mergesort",
@@ -520,6 +557,7 @@ def build_multistep_sequences(
         "sequence_length": int(sequence_length),
         "forecast_horizon": int(forecast_horizon),
         "stride": int(stride),
+        "interval_seconds": int(interval_seconds),
         "feature_dimension": feature_count,
         "target_dimension": int(forecast_horizon),
         "sequence_count": int(len(output_targets)),

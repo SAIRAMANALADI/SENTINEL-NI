@@ -61,4 +61,4 @@ These values indicate model sensitivity under masking. They do not show that a f
 
 ## Tests
 
-**104 tests passed.**
+The latest full repository suite passed **133 tests**. Historical experiment counts in this summary are not current maintenance-suite counts.

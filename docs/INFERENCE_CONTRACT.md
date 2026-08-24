@@ -30,7 +30,7 @@ The model uses the transformed 10-by-17 sequence. The policy threshold is applie
 
 ## Output
 
-`predict_network_state_sequence(sequence)` returns one JSON-serializable mapping containing model/schema/target versions, the reference timestamp, five forecast rows, operating mode, threshold, explanation, and measured timing fields.
+`predict_network_state_sequence(sequence)` returns one JSON-serializable mapping containing model/schema/target/policy versions, the reference timestamp, five forecast rows, operating mode, threshold, explanation, and measured timing fields.
 
 Each forecast row contains:
 

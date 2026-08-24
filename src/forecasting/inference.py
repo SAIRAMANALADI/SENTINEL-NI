@@ -73,8 +73,8 @@ def _validate_sequence(
     if not (deltas == pd.Timedelta(seconds=10)).all():
         raise ValueError("timestamps must be strictly ordered at exactly 10-second intervals")
     capture_day = sequence["capture_day"].astype(str).iloc[0]
-    if timestamps.iloc[-1].strftime("%Y-%m-%d") != capture_day:
-        raise ValueError("reference timestamp does not belong to capture_day")
+    if timestamps.dt.strftime("%Y-%m-%d").ne(capture_day).any():
+        raise ValueError("every timestamp must belong to capture_day")
     return sequence.copy(), timestamps, capture_day
 
 
@@ -206,6 +206,7 @@ def predict_network_state_sequence(
         "model_checkpoint": str(Path(checkpoint_path).resolve()),
         "feature_schema_version": schema_version,
         "target_version": TARGET_VERSION,
+        "policy_version": str(policy.get("policy_version", "unknown")),
         "capture_day": capture_day,
         "reference_timestamp": reference_timestamp.isoformat(),
         "forecast_horizon_seconds": 50,

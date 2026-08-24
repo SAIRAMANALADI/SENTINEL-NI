@@ -1,16 +1,23 @@
-# Foundation defaults only. Values requiring dataset or official SIH confirmation
-# are deliberately provisional and must not be presented as final requirements.
+# Current runtime metadata for the frozen offline prototype. The detailed model
+# and target contracts remain authoritative in the referenced documentation.
 project:
   id: SIH26-26153
   name: network-attack-forecasting
-  feature_version: provisional-v0
+  feature_version: network-state-v1.0
 
 paths:
-  dataset: data/samples/sample.csv
+  dataset: data/processed/cic_ids2018_network_states.parquet
+  train_split: data/processed/states/train.parquet
+  validation_split: data/processed/states/validation.parquet
+  test_split: data/processed/states/test.parquet
   model_directory: models
   results_directory: results
 
 runtime:
   random_seed: 42
-  sequence_length: 12
-  forecast_horizon_k: 3
+  state_interval_seconds: 10
+  sequence_length: 10
+  forecast_horizon_k: 5
+  target: future_attack_state
+  primary_model: models/lstm_multistep_k5.pt
+  policy: configs/operating_policy.yaml

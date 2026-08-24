@@ -1,0 +1,34 @@
+schema_version: packet-event-v1.0
+status: prototype_input_adapter
+interval_seconds: 10
+
+required_fields:
+  - timestamp
+  - source_ip
+  - destination_ip
+  - source_port
+  - destination_port
+  - protocol
+  - packet_length
+  - tcp_flags
+
+optional_fields:
+  - ttl
+  - ip_fragment
+  - tcp_window
+  - payload_length
+
+rules:
+  timestamp: original event timestamp; no rounding or rewriting
+  source_ip: observed source endpoint; not a human identity
+  destination_ip: observed destination endpoint
+  source_port: integer in [0, 65535]
+  destination_port: integer in [0, 65535]
+  protocol: observed protocol name or number, preserved as input text
+  packet_length: finite non-negative observed packet length
+  tcp_flags: observed flag names; empty is allowed when no flag is present
+
+provenance:
+  packet_values_fabricated: false
+  pcap_validated_against_cse_cic_ids2018: false
+  source_identity: flow_5tuple
