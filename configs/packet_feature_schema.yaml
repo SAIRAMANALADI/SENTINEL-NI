@@ -1,0 +1,25 @@
+schema_version: packet-features-v0-blocked
+status: blocked_no_local_matched_pcap
+fixed_interval_seconds: 10
+source_object: s3://cse-cic-ids2018/Original Network Traffic and Log data/Wednesday-28-02-2018/pcap.zip
+
+# No packet-derived feature is approved or emitted. The remote archive was not
+# downloaded, and the current flow artifact lacks a defensible 5-tuple join key.
+features: []
+
+unavailable_requirements:
+  - ttl
+  - ip_fragmentation
+  - retransmissions
+  - packet_inter_arrival_timing
+  - burst_and_packet_order
+  - packet_payload_size_distribution
+  - tcp_window_observations
+  - tcp_flag_ordering
+  - packet_counts
+  - packet_timing_statistics
+
+provenance:
+  packet_values_emitted: false
+  fabricated_values: false
+  matching_spec: docs/PCAP_FLOW_MATCHING_SPEC.md

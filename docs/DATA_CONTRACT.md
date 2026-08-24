@@ -78,6 +78,12 @@ python scripts/build_state_splits.py `
 
 The source flow artifact is immutable. PCAP enrichment is tracked separately in `docs/PCAP_ENRICHMENT_TODO.md`.
 
+## PCAP enrichment gate — current status
+
+The packet-enrichment attempt is currently **BLOCKED**. No local `.pcap`, `.pcapng`, or archive exists. The documented 2018-02-28 source is the 53,251,694,487-byte object `s3://cse-cic-ids2018/Original Network Traffic and Log data/Wednesday-28-02-2018/pcap.zip`, which contains 437 machine capture files. The object supports byte-range access, but the current canonical flow artifact lacks source/destination IPs, source port, Flow ID, and machine identity; only timestamp, destination port, and protocol are available for a potential join. Timestamp/port/protocol matching is collision-prone and no tolerance has been validated.
+
+Consequently, no packet parser, packet-derived feature, flow/PCAP match rate, or enriched state Parquet is claimed. The blocker and exact source evidence are recorded in `docs/PCAP_FLOW_MATCHING_SPEC.md`, `results/PCAP_FEATURE_COVERAGE_REPORT.md`, and `results/PCAP_PROCESSING_REPORT.md`. The flow-only handoff remains the valid ML input until an approved matched PCAP subset or an identity-preserving flow export is supplied.
+
 ## A. Raw traffic input
 
 Accepted formats and fields are not finalized. Candidate inputs are CSV traffic records and, only if approved for the final scope, PCAP files. The ingestion layer must preserve source identifiers, timestamps, labels when supplied, and enough provenance to audit transformations.
