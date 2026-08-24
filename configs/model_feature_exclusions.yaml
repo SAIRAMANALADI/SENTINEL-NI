@@ -1,0 +1,37 @@
+fields:
+  - field: Label
+    reason: Direct target label; must not enter model inputs.
+    risk_level: high
+  - field: original_label
+    reason: Preserved original target representation.
+    risk_level: high
+  - field: binary_label
+    reason: Modeling target representation; keep separate from model features.
+    risk_level: high
+  - field: Timestamp
+    reason: Raw timestamp may encode time-of-day or scenario schedule information; retain for ordering only.
+    risk_level: high
+  - field: timestamp_parsed
+    reason: Parsed timestamp is retained for ordering and chronological splitting, not as a baseline feature.
+    risk_level: high
+  - field: Dst Port
+    reason: Flow-key component and possible attack proxy; excluded until leakage policy is approved.
+    risk_level: medium
+  - field: Protocol
+    reason: Flow-key component and possible attack proxy; excluded until leakage policy is approved.
+    risk_level: medium
+  - field: Flow Byts/s
+    reason: Contains 6169 non-finite values caused by zero-duration flows; no blind imputation is authorized.
+    risk_level: high
+  - field: Flow Pkts/s
+    reason: Contains 6169 Infinity values caused by zero-duration flows; no blind imputation is authorized.
+    risk_level: high
+  - field: Flow Byts/s__raw
+    reason: Provenance copy of raw non-finite tokens; string metadata, not a model feature.
+    risk_level: high
+  - field: Flow Pkts/s__raw
+    reason: Provenance copy of raw non-finite tokens; string metadata, not a model feature.
+    risk_level: high
+  - field: source_row_number
+    reason: Source-file provenance identifier, not network behavior.
+    risk_level: high

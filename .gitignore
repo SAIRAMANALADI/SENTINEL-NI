@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Raw and processed data: keep only explicit directory markers.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/samples/*
+!data/samples/.gitkeep
+
+# Dataset copied temporarily at the workspace root; never commit it.
+Wednesday-28-02-2018_TrafficForML_CICFlowMeter.csv
+
+# Model checkpoints and generated artifacts.
+models/*
+!models/.gitkeep
+results/*
+!results/.gitkeep
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.joblib
+*.pkl
+*.parquet
+*.pcap
+*.pcapng
+
+# Build and generated output
+dist/
+build/
+*.log
+*.tmp
