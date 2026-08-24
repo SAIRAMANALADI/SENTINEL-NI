@@ -1,0 +1,86 @@
+{
+  "anomaly_policy": "14 timestamp/capture-date mismatches excluded before state construction; raw flow records preserved",
+  "cross_day_aggregation": false,
+  "feature_columns": [
+    "flow_count",
+    "byte_sum",
+    "packet_sum",
+    "mean_duration",
+    "median_duration",
+    "mean_iat",
+    "iat_std",
+    "syn_flow_ratio",
+    "ack_flow_ratio",
+    "rst_flow_ratio",
+    "fwd_byte_share",
+    "fwd_packet_share",
+    "unique_destination_port_count",
+    "bytes_per_second",
+    "packets_per_second",
+    "packet_size_mean",
+    "packet_size_std"
+  ],
+  "input": "C:\\Users\\saira\\OneDrive\\Desktop\\MyProps\\SIH26\\1\\data\\processed\\cic_ids2018_network_states.parquet",
+  "metadata_columns": [
+    "timestamp",
+    "capture_day"
+  ],
+  "method": "complete capture-day split from results/multiday_split_report.json; no random row split",
+  "schema_version": "network-state-v1.0",
+  "split_day_overlap": false,
+  "split_summary": {
+    "test": {
+      "capture_days": [
+        "2018-02-28"
+      ],
+      "future_attack_state_counts": {
+        "0": 3521,
+        "1": 798
+      },
+      "future_target_available_count": 4319,
+      "future_target_unavailable_count": 1,
+      "path": "C:\\Users\\saira\\OneDrive\\Desktop\\MyProps\\SIH26\\1\\data\\processed\\states\\test.parquet",
+      "state_count": 4320,
+      "timestamp_max": "2018-02-28 12:59:50",
+      "timestamp_min": "2018-02-28 01:00:00"
+    },
+    "train": {
+      "capture_days": [
+        "2018-02-14",
+        "2018-02-21"
+      ],
+      "future_attack_state_counts": {
+        "0": 6080,
+        "1": 1405
+      },
+      "future_target_available_count": 7485,
+      "future_target_unavailable_count": 2,
+      "path": "C:\\Users\\saira\\OneDrive\\Desktop\\MyProps\\SIH26\\1\\data\\processed\\states\\train.parquet",
+      "state_count": 7487,
+      "timestamp_max": "2018-02-21 10:43:20",
+      "timestamp_min": "2018-02-14 01:00:00"
+    },
+    "validation": {
+      "capture_days": [
+        "2018-02-22"
+      ],
+      "future_attack_state_counts": {
+        "0": 4155,
+        "1": 164
+      },
+      "future_target_available_count": 4319,
+      "future_target_unavailable_count": 1,
+      "path": "C:\\Users\\saira\\OneDrive\\Desktop\\MyProps\\SIH26\\1\\data\\processed\\states\\validation.parquet",
+      "state_count": 4320,
+      "timestamp_max": "2018-02-22 12:59:50",
+      "timestamp_min": "2018-02-22 01:00:00"
+    }
+  },
+  "target_columns": [
+    "malicious_flow_count",
+    "malicious_flow_ratio",
+    "binary_attack_state",
+    "future_attack_state",
+    "future_target_available"
+  ]
+}

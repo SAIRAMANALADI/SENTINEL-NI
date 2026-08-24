@@ -79,6 +79,7 @@ def _normalize_numeric_columns(
 def iter_cic_ids2018_flow_chunks(
     path: str | Path,
     chunksize: int = DEFAULT_CHUNKSIZE,
+    preserve_source_labels: bool = False,
 ) -> Iterator[pd.DataFrame]:
     """Yield cleaned flow chunks without modifying the source CSV.
 
@@ -139,7 +140,10 @@ def iter_cic_ids2018_flow_chunks(
             chunk_numeric_parse_errors,
         )
         chunk = parse_timestamp_column(chunk)
-        chunk = add_label_columns(chunk)
+        if preserve_source_labels:
+            chunk["original_label"] = chunk[LABEL_COLUMN].astype("string")
+        else:
+            chunk = add_label_columns(chunk)
         valid_record_count += len(chunk)
 
         chunk.attrs["ingestion_stats"] = {
@@ -163,9 +167,16 @@ def iter_cic_ids2018_flow_chunks(
 def load_cic_ids2018_flow(
     path: str | Path,
     chunksize: int = DEFAULT_CHUNKSIZE,
+    preserve_source_labels: bool = False,
 ) -> pd.DataFrame:
     """Load the CSV into a clean DataFrame using deterministic chunked reading."""
-    frames = list(iter_cic_ids2018_flow_chunks(path, chunksize=chunksize))
+    frames = list(
+        iter_cic_ids2018_flow_chunks(
+            path,
+            chunksize=chunksize,
+            preserve_source_labels=preserve_source_labels,
+        )
+    )
     if not frames:
         raise ValueError("No legitimate flow records were found after header filtering")
 

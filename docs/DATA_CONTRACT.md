@@ -23,6 +23,61 @@ The source has 613,104 records after its first header, 33 repeated header artifa
 
 Packet-level requirements are **NOT yet satisfied by the flow CSV**. TTL, fragmentation, retransmissions, packet-level IAT/burst ordering, packet payload distributions, complete TCP window observations, packet flag order, source IP/port, and complete flow identifiers require a matching PCAP and a separate extraction module.
 
+## Final network-state handoff to Nikhil
+
+The finalized flow-to-state handoff is:
+
+```text
+RAW FLOW
+  -> data/processed/cic_ids2018_multiday_flow.parquet
+CLEAN / ANOMALY-FILTERED NETWORK STATES
+  -> data/processed/cic_ids2018_network_states.parquet
+FIXED DAY-AWARE STATE SPLITS
+  -> data/processed/states/train.parquet
+  -> data/processed/states/validation.parquet
+  -> data/processed/states/test.parquet
+TEMPORAL WINDOWS
+  -> owned by Nikhil; not created in this task
+WORLD MODEL
+  -> owned by Nikhil; not created in this task
+```
+
+### State schema
+
+- Schema: `network-state-v1.0`
+- Feature schema: `configs/state_feature_schema.yaml`
+- State specification: `docs/NETWORK_STATE_SPEC.md`
+- Target specification: `docs/TARGET_STATE_SPEC.md`
+- Selected aggregation interval: `10` seconds
+- State count: `16,127`
+- Model-input feature count: `17`
+- Metadata columns: `timestamp`, `capture_day`
+- Target metadata columns: `malicious_flow_count`, `malicious_flow_ratio`, `binary_attack_state`, `future_attack_state`, `future_target_available`
+
+### Guarantees
+
+- State timestamps are ascending within each `capture_day`.
+- No state aggregation crosses a capture-day boundary.
+- No model-input feature contains NaN or Inf.
+- Attack labels and target metadata are separate from model-input features.
+- The complete-day split is fixed: 14/21-Feb train, 22-Feb validation, 28-Feb test.
+- The 14 timestamp anomalies are excluded from temporal aggregation, never corrected, and remain preserved in the flow artifact.
+- `future_attack_state=-1` and `future_target_available=false` identify terminal states with no future interval; modeling must exclude those target rows.
+
+### Build commands
+
+```powershell
+python scripts/build_network_states.py `
+  --input data/processed/cic_ids2018_multiday_flow.parquet `
+  --interval 10
+
+python scripts/build_state_splits.py `
+  --input data/processed/cic_ids2018_network_states.parquet `
+  --split-report results/multiday_split_report.json
+```
+
+The source flow artifact is immutable. PCAP enrichment is tracked separately in `docs/PCAP_ENRICHMENT_TODO.md`.
+
 ## A. Raw traffic input
 
 Accepted formats and fields are not finalized. Candidate inputs are CSV traffic records and, only if approved for the final scope, PCAP files. The ingestion layer must preserve source identifiers, timestamps, labels when supplied, and enough provenance to audit transformations.

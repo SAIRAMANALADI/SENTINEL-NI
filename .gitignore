@@ -51,6 +51,7 @@ results/*
 *.pth
 *.onnx
 *.joblib
+*.npz
 *.pkl
 *.parquet
 *.pcap

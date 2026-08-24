@@ -1,0 +1,45 @@
+schema_version: network-state-v1.0
+dataset: CSE-CIC-IDS2018
+input_artifact: data/processed/cic_ids2018_multiday_flow.parquet
+output_artifact: data/processed/cic_ids2018_network_states.parquet
+interval_seconds: 10
+
+FEATURE_COLUMNS:
+  - flow_count
+  - byte_sum
+  - packet_sum
+  - mean_duration
+  - median_duration
+  - mean_iat
+  - iat_std
+  - syn_flow_ratio
+  - ack_flow_ratio
+  - rst_flow_ratio
+  - fwd_byte_share
+  - fwd_packet_share
+  - unique_destination_port_count
+  - bytes_per_second
+  - packets_per_second
+  - packet_size_mean
+  - packet_size_std
+
+TARGET_COLUMNS:
+  - malicious_flow_count
+  - malicious_flow_ratio
+  - binary_attack_state
+  - future_attack_state
+  - future_target_available
+
+METADATA_COLUMNS:
+  - timestamp
+  - capture_day
+
+target_definition: >-
+  binary_attack_state is observed malicious-traffic presence in the current
+  state: 1 if at least one source Label is not Benign, otherwise 0.
+future_target: >-
+  future_attack_state is binary_attack_state in the next 10-second state within
+  the same capture_day; terminal states use -1 with future_target_available=false.
+anomaly_policy: >-
+  Exclude the 14 timestamp/capture-date mismatches from temporal aggregation;
+  preserve the raw records and original timestamps in the flow artifact.

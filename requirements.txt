@@ -3,3 +3,4 @@ PyYAML>=6.0,<7
 pytest>=8.0,<10
 pandas>=2.2,<4
 pyarrow>=18.0,<23
+scikit-learn>=1.5,<2
