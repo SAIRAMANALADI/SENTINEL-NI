@@ -1,0 +1,11 @@
+policy_version: live-flow-v1.0
+flow_idle_timeout_seconds: 30
+flow_active_timeout_seconds: 300
+max_tracked_flows: 10000
+overflow_behavior: reject_new_flow
+duplicate_packet_behavior: retain_observed_packet
+duration_unit: microseconds
+iat_unit: microseconds
+packet_length_unit: bytes
+reverse_traffic_behavior: canonical_bidirectional_flow
+label_behavior: unavailable_from_packet_metadata

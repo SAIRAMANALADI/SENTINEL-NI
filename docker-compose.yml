@@ -1,0 +1,47 @@
+services:
+  backend:
+    build: .
+    command: python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+    environment:
+      SIH_API_HOST: 0.0.0.0
+      SIH_API_PORT: 8000
+      SIH_TELEMETRY_MODE: mock
+      SIH_AUTH_ENABLED: ${SIH_AUTH_ENABLED:-false}
+      SIH_VIEWER_TOKEN: ${SIH_VIEWER_TOKEN:-}
+      SIH_OPERATOR_TOKEN: ${SIH_OPERATOR_TOKEN:-}
+      SIH_ADMIN_TOKEN: ${SIH_ADMIN_TOKEN:-}
+      SIH_AUDIT_LOG_PATH: /app/results/audit/events.jsonl
+      SIH_DEMO_EVENTS_PATH: /app/data/samples/final_demo_events.csv
+    volumes:
+      - ./models:/app/models:ro
+      - ./configs:/app/configs:ro
+      - ./data/samples:/app/data/samples:ro
+      - ./results/audit:/app/results/audit
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build: .
+    command: python -m streamlit run app/streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+    environment:
+      SIH_API_URL: http://backend:8000
+      SIH_API_TOKEN: ${SIH_API_TOKEN:-}
+    volumes:
+      - ./models:/app/models:ro
+      - ./configs:/app/configs:ro
+      - ./data/samples:/app/data/samples:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

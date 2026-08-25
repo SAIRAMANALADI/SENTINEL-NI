@@ -1,8 +1,9 @@
 """Streaming adapters for the frozen 10-second network-state contract.
 
 This module deliberately delegates flow-level arithmetic to the existing
-``src.features.network_state.aggregate_network_states`` implementation. It
-does not define a second feature schema or target rule.
+``src.features.network_state`` implementation. It does not define a second
+feature schema or target rule. Live packet-derived flows use the inference
+mode, which requires no unavailable label or future target.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ import pandas as pd
 
 from src.features.network_state import (
     FEATURE_COLUMNS,
-    REQUIRED_COLUMNS,
-    aggregate_network_states,
+    INFERENCE_REQUIRED_COLUMNS,
+    build_network_state_for_inference,
 )
 
 
@@ -96,11 +97,11 @@ def aggregate_flow_window(
     if "capture_date" not in frame.columns:
         timestamps = pd.to_datetime(frame["timestamp_parsed"], errors="coerce", format="mixed")
         frame["capture_date"] = timestamps.dt.strftime("%Y-%m-%d")
-    missing = sorted(REQUIRED_COLUMNS.difference(frame.columns))
+    missing = sorted(INFERENCE_REQUIRED_COLUMNS.difference(frame.columns))
     if missing:
         raise ValueError(f"flow event is missing required aggregation fields: {missing}")
 
-    states, _ = aggregate_network_states(frame, interval_seconds=interval_seconds)
+    states, _ = build_network_state_for_inference(frame, interval_seconds=interval_seconds)
     if len(states) != 1:
         raise ValueError("one flow window must produce exactly one network state")
     state = states.iloc[[0]][STATE_COLUMNS].copy()

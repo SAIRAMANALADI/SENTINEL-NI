@@ -1,6 +1,8 @@
 # Replay / Real-Time Architecture
 
-The implemented integration path is offline deterministic replay. It feeds the frozen network-state contract into the existing inference API. Live packet capture is intentionally not implemented in this phase.
+The implemented integration path supports offline deterministic replay and an
+explicit, host-level live packet metadata adapter. Live capture is optional and
+does not replace the approved offline network-state contract.
 
 ```text
 approved replay source
@@ -10,6 +12,16 @@ approved replay source
   -> existing predict_network_state_sequence()
   -> existing operating policy and explanation
   -> CLI or Streamlit consumer
+
+explicit live interface + Scapy/Npcap/libpcap
+  -> LiveTelemetryAdapter (metadata only)
+  -> existing SourceActivityAccumulator
+  -> source prioritization / mitigation recommendation
+
+Raw live packet metadata does not contain the flow fields required by the
+frozen 17-feature network-state aggregator. Therefore live source activity is
+not presented as live model inference until an approved packet-to-state
+contract exists.
 ```
 
 ## Components
@@ -17,8 +29,8 @@ approved replay source
 | Component | Current implementation | Contract |
 |---|---|---|
 | Replay source | `src/streaming/replay.py` | Emits source timestamps unchanged and in chronological order. Equal timestamps are allowed for raw flows; state timestamps are unique. Supports approved state files and CSE-CIC-IDS2018 flow CSVs. |
-| Live source | Not implemented | Future adapter only; must emit the same `ReplayEvent` shape. |
-| Packet/event collector | Not implemented | No packet capture or PCAP dependency is introduced. |
+| Live source | `src/telemetry/live.py` | Explicit interface, Scapy backend, same packet-event fields, bounded metadata queue. |
+| Packet/event collector | `LiveTelemetryAdapter` | Host-level only unless a separately secured capture-capable container is configured. |
 | 10-second aggregation buffer | `src/streaming/state_aggregator.py` | Delegates raw flow arithmetic to `aggregate_network_states()` and returns the same 17 feature names/units. |
 | State validator | `validate_state()` and `StateBuffer` | Rejects NaN/Inf, wrong columns, wrong dates, duplicate/order violations, and non-10-second gaps. |
 | Inference trigger | `src/streaming/realtime_engine.py` | Runs only after exactly 10 valid same-day states are buffered; then runs once for every new valid state. |
