@@ -8,11 +8,15 @@ These steps are intended for a clean clone. They use a project-local virtual env
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python scripts/check_environment.py
 python run.py --input data/samples/inference_demo_sequence.csv --output results/e2e_cli_result.json
 streamlit run app/streamlit_app.py
 ```
+
+The primary product surface is the standalone frontend. From the repository root,
+run `docker compose up -d --build` and open `http://localhost:3000`. Streamlit on
+port 8501 is retained as a fallback/internal development interface.
 
 ## macOS/Linux
 
@@ -20,7 +24,7 @@ streamlit run app/streamlit_app.py
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python scripts/check_environment.py
 python run.py --input data/samples/inference_demo_sequence.csv --output results/e2e_cli_result.json
 streamlit run app/streamlit_app.py

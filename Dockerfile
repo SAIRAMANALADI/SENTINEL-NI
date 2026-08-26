@@ -14,5 +14,10 @@ COPY app ./app
 COPY configs ./configs
 COPY scripts ./scripts
 
-EXPOSE 8000 8501
+# Run the application as an unprivileged service account in every container.
+RUN addgroup --system app && adduser --system --ingroup app --home /home/app app \
+    && chown -R app:app /app /home/app
+USER app
+ENV HOME=/home/app
 
+EXPOSE 8000 8501

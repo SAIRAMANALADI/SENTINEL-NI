@@ -69,6 +69,19 @@ def test_mock_and_replay_adapters(tmp_path: Path) -> None:
     replay.stop()
 
 
+def test_application_lifespan_stops_telemetry(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    adapter = MockTelemetryAdapter([{"id": 1}])
+    adapter.start()
+    app.state.runtime.telemetry = adapter
+
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health").status_code == 200
+        assert adapter.status()["started"] is True
+
+    assert adapter.status()["started"] is False
+
+
 def test_audit_and_metrics_are_safe(tmp_path: Path) -> None:
     path = tmp_path / "audit" / "events.jsonl"
     record = AuditLogger(path).record(
@@ -87,3 +100,14 @@ def test_audit_and_metrics_are_safe(tmp_path: Path) -> None:
     assert metrics.snapshot()["counters"]["request_count"] == 1
     assert metrics.snapshot()["latencies"]["inference_latency"]["last_ms"] == 12.5
 
+
+def test_metrics_latency_storage_is_constant_size() -> None:
+    metrics = MetricsRegistry()
+    for value in range(10_000):
+        metrics.observe("request_latency", float(value))
+
+    snapshot = metrics.snapshot()["latencies"]["request_latency"]
+    assert snapshot["count"] == 10_000
+    assert snapshot["last_ms"] == 9_999.0
+    assert snapshot["mean_ms"] == 4_999.5
+    assert set(metrics._latencies["request_latency"]) == {"count", "total_ms", "last_ms"}

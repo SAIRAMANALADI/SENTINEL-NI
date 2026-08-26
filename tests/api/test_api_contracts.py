@@ -88,6 +88,21 @@ def test_health_ready_model_and_forecast_contract(tmp_path: Path) -> None:
     assert "model_checkpoint" not in body
 
 
+def test_oversized_request_is_rejected_before_body_validation(tmp_path: Path) -> None:
+    settings = replace(_settings(tmp_path), max_request_bytes=100)
+    client = TestClient(create_app(settings))
+
+    response = client.post(
+        "/api/v1/source-priority",
+        content=b"x" * 101,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+    assert response.json()["error"]["max_request_bytes"] == 100
+
+
 def test_telemetry_status_and_live_control_boundary(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
     telemetry = client.get("/api/v1/telemetry")

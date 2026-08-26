@@ -46,6 +46,7 @@ class Settings:
     telemetry_interface: str | None = None
     telemetry_replay_path: Path | None = None
     telemetry_stale_after_seconds: int = 30
+    max_request_bytes: int = 2_000_000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -66,6 +67,11 @@ class Settings:
             raise ValueError("SIH_LOG_LEVEL is not a supported logging level")
 
         auth_enabled = _env_bool("SIH_AUTH_ENABLED", False)
+        max_request_bytes_raw = os.getenv("SIH_MAX_REQUEST_BYTES", "2000000")
+        try:
+            max_request_bytes = int(max_request_bytes_raw)
+        except ValueError as exc:
+            raise ValueError("SIH_MAX_REQUEST_BYTES must be an integer") from exc
         tokens = {
             "viewer": os.getenv("SIH_VIEWER_TOKEN"),
             "operator": os.getenv("SIH_OPERATOR_TOKEN"),
@@ -101,6 +107,7 @@ class Settings:
                 "SIH_TELEMETRY_REPLAY_PATH", PROJECT_ROOT / "data" / "samples" / "inference_demo_sequence.csv"
             ),
             telemetry_stale_after_seconds=int(os.getenv("SIH_TELEMETRY_STALE_AFTER_SECONDS", "30")),
+            max_request_bytes=max_request_bytes,
         )
 
     def validate(self) -> None:
@@ -113,6 +120,8 @@ class Settings:
                 raise FileNotFoundError(f"{name} does not exist: {path}")
         if self.telemetry_stale_after_seconds <= 0:
             raise ValueError("telemetry_stale_after_seconds must be positive")
+        if self.max_request_bytes <= 0:
+            raise ValueError("max_request_bytes must be positive")
 
     def role_tokens(self) -> dict[str, str | None]:
         return {"viewer": self.viewer_token, "operator": self.operator_token, "admin": self.admin_token}

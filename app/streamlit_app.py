@@ -69,58 +69,281 @@ def _render_header() -> None:
     st.markdown(
         """
         <style>
-        .stApp { background: #07111f; color: #e7eef8; }
-        [data-testid="stHeader"] { background: #07111f; }
-        .hero { padding: 1.2rem 1.4rem; border: 1px solid #1d3b59; border-radius: 14px; background: linear-gradient(135deg, #0b1b2d, #102a40); margin-bottom: 1rem; }
-        .eyebrow { color: #54d6c7; font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; }
-        .hero h1 { margin: .25rem 0 .35rem; color: #f4f8fc; font-size: 2rem; }
-        .hero p { margin: 0; color: #a9bfd2; }
-        .warning-card { padding: 1rem; border-radius: 12px; border: 1px solid #9e6b2d; background: #2b2112; }
-        .clear-card { padding: 1rem; border-radius: 12px; border: 1px solid #276b65; background: #102b2b; }
-        .muted { color: #9fb4c7; font-size: .88rem; }
-        .integrated-status { padding: 1.05rem 1.2rem; border-radius: 15px; border: 1px solid #ff6b61; background: linear-gradient(135deg, #351b25, #241622); box-shadow: 0 8px 24px rgba(255, 88, 77, .14); margin: .35rem 0 .8rem; }
-        .integrated-status.clear { border-color: #3dc7b7; background: linear-gradient(135deg, #102e32, #12232f); box-shadow: 0 8px 24px rgba(61, 199, 183, .12); }
-        .integrated-status .status-title { color: #fff4f2; font-size: clamp(1.65rem, 3vw, 2.35rem); font-weight: 800; letter-spacing: .01em; line-height: 1.05; margin: .25rem 0 .35rem; }
-        .integrated-status.clear .status-title { color: #d9fff8; }
-        .integrated-status .status-copy { color: #e9c7c3; font-size: .92rem; }
-        .integrated-status.clear .status-copy { color: #b7e6df; }
-        .summary-metric { min-height: 5.2rem; padding: .8rem .9rem; border: 1px solid #23445f; border-radius: 12px; background: #0b1b2b; }
-        .summary-metric .label { color: #8ca9bf; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
-        .summary-metric .value { color: #f5f8fb; font-size: 1.35rem; font-weight: 750; margin-top: .35rem; }
-        .source-card { min-height: 9.5rem; padding: .85rem .9rem; border: 1px solid #294b64; border-radius: 12px; background: #0a1928; }
-        .source-card.high { border-color: #ff725f; background: linear-gradient(145deg, #301b25, #121c2a); }
-        .source-card.medium { border-color: #e0ad55; background: linear-gradient(145deg, #2b2418, #121c2a); }
-        .source-card.low { border-color: #2a6370; }
-        .source-card .rank { color: #62d7ca; font-size: .7rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-        .source-card .source { color: #f2f7fb; font-size: 1.08rem; font-weight: 750; margin: .3rem 0; }
-        .source-card .priority { color: #ffb6a9; font-size: .76rem; font-weight: 800; letter-spacing: .06em; }
-        .source-card.low .priority { color: #8ddbd1; }
-        .source-card.medium .priority { color: #f2c776; }
-        .source-card .reason { color: #afc1d0; font-size: .78rem; line-height: 1.35; margin-top: .55rem; }
-        .mitigation-card { min-height: 6.2rem; padding: .75rem .85rem; border-left: 3px solid #54d6c7; border-radius: 9px; background: #0b1b2b; }
-        .mitigation-card.high { border-left-color: #ff725f; }
-        .mitigation-card .source { color: #dbe8f1; font-weight: 750; font-size: .86rem; }
-        .mitigation-card .action { color: #fff; font-size: .88rem; margin-top: .35rem; line-height: 1.25; }
-        .mitigation-card .tag { color: #83a0b4; font-size: .68rem; letter-spacing: .09em; text-transform: uppercase; margin-top: .45rem; }
-        .forecast-timeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .55rem; margin: .3rem 0 .65rem; }
-        .forecast-step { padding: .7rem .55rem; border: 1px solid #23445f; border-radius: 10px; background: #0a1928; text-align: center; }
-        .forecast-step.primary { border-color: #ff725f; background: #2b1a25; }
-        .forecast-step.warning { box-shadow: inset 0 -3px 0 #ff725f; }
-        .forecast-step .horizon { color: #7fa6be; font-size: .7rem; font-weight: 800; letter-spacing: .08em; }
-        .forecast-step .score { color: #f5f8fb; font-size: 1.15rem; font-weight: 750; margin-top: .25rem; }
-        .forecast-step .decision { color: #ffad9f; font-size: .65rem; margin-top: .22rem; }
-        .forecast-step:not(.warning) .decision { color: #8bcfc7; }
-        .telemetry-strip { padding: .65rem .8rem; border: 1px solid #23445f; border-radius: 10px; background: #0a1928; }
-        @media (max-width: 900px) { .forecast-timeline { gap: .3rem; } .forecast-step { padding: .55rem .25rem; } .forecast-step .score { font-size: .98rem; } }
+        :root { --ink: #f4f7fb; --muted: #8d9eaf; --line: #223243; --surface: #0e1823; --surface-2: #111e2b; --cyan: #67d7cb; --amber: #e9b45f; --red: #ff7569; --green: #72d19b; }
+        .stApp { background: #080d14; color: var(--ink); }
+        [data-testid="stHeader"] { background: #080d14; }
+        [data-testid="stSidebar"] { background: #0a111a; border-right: 1px solid #182532; }
+        [data-testid="stSidebar"] > div:first-child { padding-top: 1.15rem; }
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+        [data-testid="stRadio"] label { color: #c4d0dc; font-size: .82rem; }
+        [data-testid="stBaseButton-primary"] { background: #d8a35d !important; border-color: #e5b873 !important; color: #0b1219 !important; }
+        [data-testid="stBaseButton-primary"] p { color: #0b1219 !important; font-weight: 800 !important; }
+        [data-testid="stBaseButton-primary"]:hover { background: #e7b873 !important; border-color: #f2cc91 !important; }
+        .block-container { max-width: 1420px; padding: 1.25rem 2.4rem 3rem; }
+        .brand-lockup { padding: .2rem .1rem 1.25rem; border-bottom: 1px solid #1c2b39; margin-bottom: 1rem; }
+        .brand-mark { color: var(--cyan); font-size: .7rem; font-weight: 800; letter-spacing: .19em; text-transform: uppercase; }
+        .brand-name { color: #f4f7fb; font-size: 1.22rem; letter-spacing: -.03em; font-weight: 750; margin-top: .25rem; }
+        .brand-sub { color: #718496; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; margin-top: .25rem; }
+        .shell-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; padding: .15rem 0 1rem; border-bottom: 1px solid #1b2936; margin-bottom: 1rem; }
+        .shell-kicker, .eyebrow { color: var(--cyan); font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; font-weight: 800; }
+        .shell-title { color: #f7f9fc; font-size: clamp(1.45rem, 2.7vw, 2.25rem); letter-spacing: -.055em; font-weight: 760; line-height: 1.05; margin: .28rem 0 .35rem; }
+        .shell-copy { color: #91a3b4; font-size: .88rem; max-width: 660px; line-height: 1.45; }
+        .header-status { display:flex; align-items:center; gap:.55rem; color:#c8d5df; font-size:.76rem; white-space:nowrap; padding-top:.25rem; }
+        .status-dot { width:.52rem; height:.52rem; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(114,209,155,.09); }
+        .section-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; margin: 1.8rem 0 .75rem; }
+        .section-title { color:#eff4f8; font-size:1rem; font-weight:750; letter-spacing:-.02em; margin:0; }
+        .section-meta { color:#708497; font-size:.72rem; }
+        .panel { border:1px solid var(--line); border-radius:14px; background:linear-gradient(145deg, #101b27, #0c151f); padding:1.05rem 1.15rem; }
+        .panel-tight { padding:.82rem .95rem; }
+        .hero-panel { border:1px solid #4a3038; border-radius:16px; background:linear-gradient(130deg, #221923, #111923 68%); padding:1.15rem 1.25rem; min-height:10.4rem; }
+        .hero-panel.clear { border-color:#28544f; background:linear-gradient(130deg, #122623, #101b24 68%); }
+        .hero-label { color:#b8c6d0; font-size:.68rem; letter-spacing:.13em; text-transform:uppercase; font-weight:800; }
+        .hero-status { color:#fff4f1; font-size:clamp(1.8rem, 4vw, 3rem); font-weight:800; letter-spacing:-.06em; line-height:1; margin:.5rem 0 .65rem; }
+        .hero-panel.clear .hero-status { color:#d9fff5; }
+        .hero-score { color:#f8fafc; font-variant-numeric:tabular-nums; font-size:clamp(2.1rem, 5vw, 3.7rem); font-weight:780; letter-spacing:-.065em; }
+        .hero-score-label { color:#8da1b1; font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; margin-top:.25rem; }
+        .hero-foot { display:flex; gap:1.2rem; flex-wrap:wrap; color:#91a5b5; font-size:.78rem; margin-top:1rem; }
+        .hero-foot strong { color:#e7eef5; font-weight:650; }
+        .metric-rail { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.6rem; }
+        .metric-cell { border:1px solid var(--line); border-radius:11px; background:#0d1721; padding:.78rem .85rem; min-height:4.7rem; }
+        .metric-label { color:#718699; font-size:.64rem; letter-spacing:.12em; text-transform:uppercase; font-weight:800; }
+        .metric-value { color:#f1f5f8; font-size:1.05rem; font-weight:720; font-variant-numeric:tabular-nums; margin-top:.42rem; }
+        .metric-note { color:#7f93a5; font-size:.69rem; margin-top:.18rem; }
+        .forecast-timeline { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.5rem; margin:.25rem 0 .8rem; }
+        .forecast-step { position:relative; padding:.78rem .65rem .72rem; border:1px solid var(--line); border-radius:11px; background:#0d1721; text-align:left; overflow:hidden; }
+        .forecast-step.primary { border-color:#657c91; background:#122130; }
+        .forecast-step.warning { border-bottom:2px solid var(--amber); }
+        .forecast-step.primary.warning { border-color:#a26d4d; background:#241b1c; }
+        .forecast-step .horizon { color:#8ca3b5; font-size:.66rem; font-weight:800; letter-spacing:.1em; }
+        .forecast-step .score { color:#f4f7fa; font-size:1.2rem; font-weight:760; font-variant-numeric:tabular-nums; letter-spacing:-.035em; margin-top:.4rem; }
+        .forecast-step .decision { color:#81d4bb; font-size:.63rem; margin-top:.2rem; }
+        .forecast-step.warning .decision { color:#f3bd75; }
+        .forecast-threshold { color:#73899a; font-size:.7rem; }
+        .source-card { min-height:10rem; padding:1rem; border:1px solid var(--line); border-radius:13px; background:#0d1721; }
+        .source-card.high { border-color:#a45e58; background:linear-gradient(145deg,#26191d,#101923); }
+        .source-card.medium { border-color:#80663f; background:linear-gradient(145deg,#211d17,#101923); }
+        .source-card.low { border-color:#2e5961; }
+        .source-card .rank { color:#6f899c; font-size:.63rem; font-weight:850; letter-spacing:.14em; text-transform:uppercase; }
+        .source-card .source { color:#f2f6f9; font-size:1.05rem; font-weight:750; margin:.48rem 0 .3rem; font-variant-numeric:tabular-nums; }
+        .source-card .priority { color:#ffad9e; font-size:.68rem; font-weight:850; letter-spacing:.1em; }
+        .source-card.low .priority { color:#82d6c7; }
+        .source-card.medium .priority { color:#efc477; }
+        .source-card .reason { color:#acbdca; font-size:.76rem; line-height:1.42; margin-top:.72rem; }
+        .source-card .evidence { color:#7f96a7; font-size:.7rem; line-height:1.4; margin-top:.52rem; }
+        .mitigation-card { min-height:6.2rem; padding:.9rem 1rem; border:1px solid #294253; border-left:3px solid var(--cyan); border-radius:11px; background:#0d1721; }
+        .mitigation-card.high { border-left-color:var(--red); border-color:#4f3437; }
+        .mitigation-card .source { color:#eef3f7; font-weight:740; font-size:.84rem; }
+        .mitigation-card .action { color:#d2dee6; font-size:.82rem; margin-top:.42rem; line-height:1.32; }
+        .mitigation-card .tag { color:#7690a1; font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; margin-top:.58rem; }
+        .timeline-flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.35rem; }
+        .timeline-node { position:relative; padding:.72rem .65rem; border-top:2px solid #315160; background:#0d1721; border-radius:0 0 9px 9px; }
+        .timeline-node .node-num { color:var(--cyan); font-size:.61rem; font-weight:850; letter-spacing:.12em; }
+        .timeline-node .node-label { color:#d7e2e9; font-size:.72rem; margin-top:.38rem; }
+        .timeline-node .node-copy { color:#73899a; font-size:.64rem; margin-top:.18rem; }
+        .explain-lead { border-left:2px solid var(--cyan); padding:.6rem .8rem; background:#0d1721; border-radius:0 9px 9px 0; }
+        .explain-feature { color:#f1f6f8; font-size:1.08rem; font-weight:740; margin-top:.28rem; }
+        .explain-value { color:var(--cyan); font-size:.8rem; font-variant-numeric:tabular-nums; margin-top:.22rem; }
+        .disclaimer { color:#7f93a4; font-size:.72rem; line-height:1.45; }
+        .telemetry-strip { padding:.72rem .8rem; border:1px solid var(--line); border-radius:10px; background:#0d1721; min-height:4.6rem; }
+        .telemetry-strip .label { color:#718699; font-size:.63rem; letter-spacing:.11em; text-transform:uppercase; font-weight:800; }
+        .telemetry-strip strong { color:#ecf3f7; display:block; font-size:.88rem; margin-top:.42rem; overflow-wrap:anywhere; }
+        .mode-pill { display:inline-block; padding:.26rem .5rem; border-radius:99px; border:1px solid #2c5f5e; color:#8de0cf; background:#102725; font-size:.62rem; font-weight:800; letter-spacing:.11em; }
+        .simulation-banner { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding:.58rem .8rem; border:1px solid #3e4b56; border-radius:9px; background:#0c151e; color:#a8bac6; font-size:.7rem; }
+        .simulation-banner strong { color:#f0c477; letter-spacing:.08em; }
+        .command-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(260px,.8fr); gap:.7rem; align-items:stretch; }
+        .watch-panel { border:1px solid var(--line); border-radius:14px; background:#0d1721; padding:1rem; }
+        .watch-row { display:grid; grid-template-columns:1.6rem 1fr auto; gap:.5rem; align-items:center; padding:.58rem 0; border-bottom:1px solid #1c2a37; }
+        .watch-row:last-child { border-bottom:0; }
+        .watch-rank { color:#6d889b; font-size:.62rem; font-weight:850; }
+        .watch-source { color:#eaf1f5; font-size:.78rem; font-weight:720; }
+        .watch-meta { color:#718899; font-size:.63rem; margin-top:.18rem; }
+        .watch-priority { color:#ffad9e; font-size:.6rem; font-weight:850; letter-spacing:.08em; text-align:right; }
+        .watch-priority.low { color:#82d6c7; }
+        .watch-priority.medium { color:#efc477; }
+        .watch-callout { margin-top:.8rem; padding:.65rem .7rem; border-left:2px solid var(--amber); background:#171a1d; color:#c9d5dc; font-size:.7rem; line-height:1.35; }
+        @media (max-width: 900px) { .command-grid { grid-template-columns:1fr; } }
+        @media (max-width: 900px) { .block-container { padding-left:1rem; padding-right:1rem; } .metric-rail { grid-template-columns:repeat(2,minmax(0,1fr)); } .timeline-flow { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+        @media (max-width: 620px) { .shell-header { display:block; } .header-status { margin-top:.8rem; } .forecast-timeline { gap:.28rem; } .forecast-step { padding:.62rem .38rem; } .forecast-step .score { font-size:.98rem; } .timeline-flow { grid-template-columns:1fr; } }
         </style>
-        <div class="hero">
-          <div class="eyebrow">SIH26-26153 · Offline defensive forecasting</div>
-          <h1>Network State Forecast</h1>
-          <p>Review the next 50 seconds of forecast score from an approved 10-second network-state sequence.</p>
+        <div class="brand-lockup">
+          <div class="brand-mark">SIH26-26153 / security intelligence</div>
+          <div class="brand-name">SENTINEL <span style="color:#6c8496">/</span> NETWORK INTELLIGENCE</div>
+          <div class="brand-sub">Network-state forecasting command center</div>
+        </div>
+        <div class="shell-header">
+          <div>
+            <div class="shell-kicker">Operations workspace</div>
+            <div class="shell-title">See the next network state before it arrives.</div>
+            <div class="shell-copy">A controlled forecast surface for analyst review, source prioritization, and recommendation-only response.</div>
+          </div>
+          <div class="header-status"><span class="status-dot"></span><span>MODEL SERVICE / OPERATIONAL</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _section(title: str, meta: str | None = None) -> None:
+    suffix = f'<span class="section-meta">{escape(meta)}</span>' if meta else ""
+    st.markdown(
+        f'<div class="section-head"><div class="section-title">{escape(title)}</div>{suffix}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _metric_rail(items: list[tuple[str, str, str]]) -> None:
+    cells = []
+    for label, value, note in items:
+        cells.append(
+            f'<div class="metric-cell"><div class="metric-label">{escape(label)}</div>'
+            f'<div class="metric-value">{escape(value)}</div><div class="metric-note">{escape(note)}</div></div>'
+        )
+    st.markdown(f'<div class="metric-rail">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+
+def _render_forecast_timeline(rows: list[dict[str, object]], threshold: float) -> None:
+    timeline = []
+    for index, row in enumerate(rows):
+        warning = bool(row.get("warning"))
+        classes = ["forecast-step"]
+        if index == 0:
+            classes.append("primary")
+        if warning:
+            classes.append("warning")
+        decision = "Predictive warning" if warning else "No predictive warning"
+        timeline.append(
+            f'<div class="{" ".join(classes)}"><div class="horizon">+{int(row["horizon_seconds"])}s'
+            f'{" · PRIMARY" if index == 0 else ""}</div><div class="score">{float(row["score"]):.4f}</div>'
+            f'<div class="decision">{decision}</div></div>'
+        )
+    st.markdown(f'<div class="forecast-timeline">{"".join(timeline)}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="forecast-threshold">Operating threshold <strong>{float(threshold):.2f}</strong> · '
+        'scores are raw model outputs, not a calibrated probability</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_forecast_chart(rows: list[dict[str, object]], threshold: float) -> None:
+    chart = pd.DataFrame(
+        {
+            "Forecast Score": [float(row["score"]) for row in rows],
+            "Threshold": [float(threshold)] * len(rows),
+        },
+        index=[f'+{int(row["horizon_seconds"])}s' for row in rows],
+    )
+    st.line_chart(chart, y=["Forecast Score", "Threshold"], use_container_width=True, height=220)
+
+
+def _render_operational_status(
+    *,
+    warning: bool,
+    score: float,
+    threshold: float,
+    context: str,
+    reference_timestamp: str,
+) -> None:
+    status_label = "Predictive warning" if warning else "No predictive warning"
+    status_class = "" if warning else "clear"
+    st.markdown(
+        f'''
+        <div class="hero-panel {status_class}">
+          <div class="hero-label">Primary operating outlook · +10 seconds</div>
+          <div class="hero-status">{escape(status_label)}</div>
+          <div class="hero-score">{float(score):.4f}</div>
+          <div class="hero-score-label">Forecast Score</div>
+          <div class="hero-foot"><span>Threshold <strong>{float(threshold):.2f}</strong></span>
+          <span>Reference <strong>{escape(reference_timestamp)}</strong></span>
+          <span>{escape(context)}</span></div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_system_timeline(items: list[tuple[str, str]]) -> None:
+    nodes = []
+    for index, (label, copy) in enumerate(items, start=1):
+        nodes.append(
+            f'<div class="timeline-node"><div class="node-num">0{index}</div>'
+            f'<div class="node-label">{escape(label)}</div><div class="node-copy">{escape(copy)}</div></div>'
+        )
+    st.markdown(f'<div class="timeline-flow">{"".join(nodes)}</div>', unsafe_allow_html=True)
+
+
+def _render_explanation_panel(explanation: dict[str, object]) -> None:
+    top_features = list(explanation.get("top_features") or [])
+    temporal = list(explanation.get("temporal_positions") or [])
+    _section("Why this forecast?", "model sensitivity / not causal explanation")
+    if top_features:
+        lead = top_features[0]
+        st.markdown(
+            f'<div class="explain-lead"><div class="eyebrow">Top contributing signal</div>'
+            f'<div class="explain-feature">{escape(str(lead.get("feature", "Unavailable")))}</div>'
+            f'<div class="explain-value">Sensitivity {float(lead.get("sensitivity", 0.0)):.4f} · '
+            f'{escape(str(lead.get("time_position", "current state")))}</div></div>',
+            unsafe_allow_html=True,
+        )
+        if len(top_features) > 1:
+            signal_text = " · ".join(str(row.get("feature", "Unavailable")) for row in top_features[1:4])
+            st.caption(f"Other important signals · {signal_text}")
+    if temporal:
+        temporal_frame = pd.DataFrame(
+            [
+                {"Position": row.get("time_position"), "Sensitivity": float(row.get("sensitivity", 0.0))}
+                for row in temporal[:5]
+            ]
+        ).set_index("Position")
+        st.caption("Temporal contribution across the L=10 input history")
+        st.bar_chart(temporal_frame, y="Sensitivity", height=150)
+    st.markdown(
+        '<div class="disclaimer">MODEL SENSITIVITY — NOT CAUSAL EXPLANATION. '
+        'A high-sensitivity signal does not establish an attack cause or source identity.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_source_cards(prioritized: list[dict[str, object]], limit: int = 3) -> None:
+    rows = prioritized[:limit]
+    if not rows:
+        st.caption("No current candidate-source activity is available.")
+        return
+    source_cols = st.columns(min(3, len(rows)))
+    for index, (column, row) in enumerate(zip(source_cols, rows), start=1):
+        priority = str(row.get("priority", "LOW PRIORITY SOURCE"))
+        priority_class = "high" if priority.startswith("HIGH") else "medium" if priority.startswith("MEDIUM") else "low"
+        activity = row.get("activity_features") or row
+        evidence = (
+            f'{int(activity.get("packet_count", 0))} packets · '
+            f'{float(activity.get("byte_count", 0.0)):.0f} bytes · '
+            f'{int(activity.get("unique_destinations", 0))} destinations'
+        )
+        column.markdown(
+            f'<div class="source-card {priority_class}"><div class="rank">Rank {index:02d} · candidate source</div>'
+            f'<div class="source">{escape(str(row.get("source_ip", "Unavailable")))}</div>'
+            f'<div class="priority">{escape(priority)}</div>'
+            f'<div class="reason">{escape(str(row.get("measured_reasons", "Measured activity only")))}</div>'
+            f'<div class="evidence">{escape(evidence)}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_mitigation_cards(recommendations: list[dict[str, object]], prioritized: list[dict[str, object]]) -> None:
+    if not recommendations:
+        st.caption("No mitigation recommendation is currently available.")
+        return
+    priority_by_source = {str(row.get("source_ip")): str(row.get("priority", "")) for row in prioritized}
+    cards = st.columns(min(3, len(recommendations)))
+    for column, row in zip(cards, recommendations[:3]):
+        source = str(row.get("source_ip", "Unavailable"))
+        priority = priority_by_source.get(source, str(row.get("priority", "LOW PRIORITY SOURCE")))
+        priority_class = "high" if priority.startswith("HIGH") else ""
+        column.markdown(
+            f'<div class="mitigation-card {priority_class}"><div class="source">{escape(source)} · '
+            f'{escape(priority)}</div><div class="action">{escape(str(row.get("recommendation", "Monitor source")))}</div>'
+            '<div class="tag">Simulation only · automatic blocking disabled</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _render_input() -> tuple[pd.DataFrame | None, str | None]:
@@ -159,88 +382,41 @@ def _render_preview(frame: pd.DataFrame, source_name: str) -> None:
 
 
 def _render_current_state(result: dict[str, object], frame: pd.DataFrame) -> None:
-    st.subheader("Current State")
-    cols = st.columns(5)
-    cols[0].metric("Reference timestamp", str(result["reference_timestamp"]))
-    cols[1].metric("State interval", "10 seconds")
-    cols[2].metric("Input states", str(result.get("input_states", len(frame))))
-    cols[3].metric("Features", "17")
-    cols[4].metric("Model", "LSTM K=5")
+    _section("Current network state", "approved input contract")
+    _metric_rail(
+        [
+            ("Reference timestamp", str(result["reference_timestamp"]), "forecast origin"),
+            ("State interval", "10 seconds", "frozen cadence"),
+            ("Input states", str(result.get("input_states", len(frame))), "L=10 context"),
+            ("Features", "17", "frozen schema"),
+        ]
+    )
 
 
 def _render_warning(result: dict[str, object]) -> None:
     primary = result["forecast"][0]
-    warning = bool(primary["warning"])
-    card_class = "warning-card" if warning else "clear-card"
-    label = "PREDICTIVE WARNING" if warning else "NO PREDICTIVE WARNING"
-    st.subheader("Operating Warning")
-    st.markdown(
-        f"""
-        <div class="{card_class}">
-          <div class="eyebrow">+10 second forecast</div>
-          <h2>{label}</h2>
-          <p class="muted">Forecast Score: <strong>{float(primary['score']):.6f}</strong> · Threshold: <strong>{float(result['threshold']):.2f}</strong></p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    _section("Operating warning", "primary +10 second horizon")
+    _render_operational_status(
+        warning=bool(primary["warning"]),
+        score=float(primary["score"]),
+        threshold=float(result["threshold"]),
+        context=f'{result.get("operating_mode", "configured")} operating mode',
+        reference_timestamp=str(result.get("reference_timestamp", "Unavailable")),
     )
     st.caption("A Predictive warning means the Forecast Score crossed the selected operating threshold. It is not an attack confirmation.")
 
 
 def _render_forecast(result: dict[str, object]) -> None:
-    st.subheader("Future Forecast")
     rows = result["forecast"]
-    table = pd.DataFrame(
-        [
-            {
-                "Horizon": f"+{row['horizon_seconds']}s",
-                "Timestamp": row["timestamp"],
-                "Forecast Score": float(row["score"]),
-                "Status": "Predictive warning" if row["warning"] else "No predictive warning",
-            }
-            for row in rows
-        ]
-    )
-    st.dataframe(table, use_container_width=True, hide_index=True)
-
-    chart = table.set_index("Timestamp")[["Forecast Score"]].copy()
-    chart["Threshold"] = float(result["threshold"])
-    st.subheader("Forecast Score Trajectory")
-    st.line_chart(chart, y=["Forecast Score", "Threshold"], use_container_width=True)
+    _section("Future forecast", "+10s primary · +20s to +50s context")
+    _render_forecast_timeline(rows, float(result["threshold"]))
+    _section("Forecast Score Trajectory", "raw score against operating threshold")
+    _render_forecast_chart(rows, float(result["threshold"]))
     st.caption("The trajectory shows model scores across future horizons; a rise is not automatically an attack progression.")
 
 
 def _render_explanation(result: dict[str, object]) -> None:
-    explanation = result["explanation"]
-    st.subheader("Explanation")
-    st.caption("Strong model sensitivity is descriptive score response, not causal attribution.")
-    top_features = pd.DataFrame(
-        [
-            {
-                "Top contributing signal": row["feature"],
-                "Contribution": float(row["contribution"]),
-                "Sensitivity": float(row["sensitivity"]),
-                "Temporal position": row["time_position"],
-            }
-            for row in explanation.get("top_features", [])
-        ]
-    )
-    if not top_features.empty:
-        st.markdown("**Top contributing features**")
-        st.dataframe(top_features, use_container_width=True, hide_index=True)
-    temporal = pd.DataFrame(
-        [
-            {
-                "Temporal position": row["time_position"],
-                "Sensitivity": float(row["sensitivity"]),
-                "Signed contribution": float(row["signed_contribution"]),
-            }
-            for row in explanation.get("temporal_positions", [])[:5]
-        ]
-    )
-    if not temporal.empty:
-        st.markdown("**Most influential temporal positions**")
-        st.dataframe(temporal, use_container_width=True, hide_index=True)
+    _render_explanation_panel(result["explanation"])
 
 
 def _render_technical(result: dict[str, object]) -> None:
@@ -263,30 +439,11 @@ def _render_technical(result: dict[str, object]) -> None:
 def _render_source_prioritization(prioritized: pd.DataFrame, recommendations: list[dict[str, object]]) -> None:
     """Render the optional recommendation-only source-attribution sidecar."""
 
-    st.subheader("SOURCE PRIORITIZATION")
-    recommendation_by_source = {row["source_ip"]: row["recommendation"] for row in recommendations}
-    rows = []
-    for row in prioritized.to_dict(orient="records"):
-        context = row.get("forecast_context") or {}
-        forecast_context = "Elevated network forecast" if context.get("network_warning") else "No elevated network forecast"
-        if not context.get("available"):
-            forecast_context = "Network forecast unavailable"
-        rows.append(
-            {
-                "Source": row["source_ip"],
-                "Activity": (
-                    f"{int(row['packet_count'])} packets · {float(row['byte_count']):.0f} bytes · "
-                    f"{int(row['unique_destinations'])} destinations"
-                ),
-                "Forecast context": forecast_context,
-                "Priority": row["priority"],
-                "Recommended action": recommendation_by_source.get(row["source_ip"], "Monitor source"),
-                "Measured reasons": row["measured_reasons"],
-            }
-        )
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption("Prototype source adapter: a high-priority source is a candidate source, not an attribution claim. No traffic is blocked.")
+    _section("Source intelligence", "ranked candidate sources")
+    _render_source_cards(prioritized.to_dict(orient="records"))
+    _section("Recommended response", "advisory action only")
+    _render_mitigation_cards(recommendations, prioritized.to_dict(orient="records"))
+    st.caption("A high-priority source is a candidate source, not an attribution claim. No traffic is blocked.")
 
 
 def _render_replay_mode() -> None:
@@ -345,10 +502,15 @@ def _render_replay_mode() -> None:
 
 def _render_integrated_demo() -> None:
     # run_final_demo remains backend-owned; Streamlit calls only the API.
-    st.subheader("Full Integrated Demo")
-    st.caption("Backend API replay using deterministic DEMO / TEST DATA — NOT RESEARCH DATA.")
+    _section("Full Integrated Demo", "controlled replay / backend-mediated")
+    st.markdown(
+        '<div class="simulation-banner"><span><strong>SIMULATION ONLY: TRUE</strong> · '
+        'Deterministic demo fixture, not live telemetry or research data.</span>'
+        '<span class="mode-pill">OPERATOR REVIEW</span></div>',
+        unsafe_allow_html=True,
+    )
     if not st.button("RUN FULL DEMO", type="primary", use_container_width=True):
-        st.info("Run the backend-mediated source → network state → forecast → mitigation demonstration.")
+        st.caption("Run the backend-mediated source → network state → forecast → mitigation demonstration.")
         return
     try:
         result = post_json("/api/v1/demo")
@@ -369,105 +531,52 @@ def _render_integrated_demo() -> None:
         "forecast_horizon_seconds": network["forecast_horizon_seconds"],
         "timing_ms": result["timing_ms"],
     }
-    st.success("Full integrated backend demonstration completed")
     primary = network["forecasts"][0]
-    status_class = "" if primary["warning"] else "clear"
-    status_label = "Predictive warning" if primary["warning"] else "No predictive warning"
-    st.markdown(
-        f"""
-        <div class="integrated-status {status_class}">
-          <div class="eyebrow">NETWORK STATUS · PRIMARY +10 SECOND OUTLOOK</div>
-          <div class="status-title">{escape(status_label)}</div>
-          <div class="status-copy">Forecast Score {float(primary['score']):.6f} · Threshold {float(network['threshold']):.2f} · Balanced operating mode</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    metric_cols = st.columns(4)
-    summary_metrics = [
-        ("Forecast Score", f"{float(primary['score']):.6f}"),
-        ("Threshold", f"{float(network['threshold']):.2f}"),
-        ("Primary horizon", "+10 seconds"),
-        ("Context", "L=10 · 10 states"),
-    ]
-    for column, (label, value) in zip(metric_cols, summary_metrics):
-        column.markdown(
-            f'<div class="summary-metric"><div class="label">{escape(label)}</div><div class="value">{escape(value)}</div></div>',
-            unsafe_allow_html=True,
-        )
-    st.caption("Forecast Score is the raw model output; it is not a calibrated probability.")
-
     prioritized = pd.DataFrame(result["source_priorities"])
     recommendations = result["mitigation_recommendations"]
-    st.subheader("Top Candidate Sources")
-    source_cols = st.columns(max(1, min(3, len(prioritized))))
-    for column, row in zip(source_cols, prioritized.to_dict(orient="records")):
-        priority = str(row["priority"])
-        priority_class = "high" if priority.startswith("HIGH") else "medium" if priority.startswith("MEDIUM") else "low"
-        activity = row.get("activity_features", {})
-        activity_text = (
-            f"{int(activity.get('packet_count', row.get('packet_count', 0)))} packets · "
-            f"{float(activity.get('byte_count', row.get('byte_count', 0))):.0f} bytes · "
-            f"{int(activity.get('unique_destinations', row.get('unique_destinations', 0)))} destinations"
-        )
-        column.markdown(
-            f"""
-            <div class="source-card {priority_class}">
-              <div class="rank">Rank {list(prioritized['source_ip']).index(row['source_ip']) + 1}</div>
-              <div class="source">{escape(str(row['source_ip']))}</div>
-              <div class="priority">{escape(priority)}</div>
-              <div class="reason">{escape(str(row['measured_reasons']))}<br><span class="muted">{escape(activity_text)}</span></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.subheader("Mitigation Recommendations")
-    mitigation_cols = st.columns(max(1, min(3, len(recommendations))))
-    for column, recommendation in zip(mitigation_cols, recommendations):
-        source_priority = next(
-            (row["priority"] for row in prioritized.to_dict(orient="records") if row["source_ip"] == recommendation["source_ip"]),
-            "LOW PRIORITY SOURCE",
-        )
-        priority_class = "high" if str(source_priority).startswith("HIGH") else ""
-        column.markdown(
-            f"""
-            <div class="mitigation-card {priority_class}">
-              <div class="source">{escape(str(recommendation['source_ip']))}</div>
-              <div class="action">{escape(str(recommendation['recommendation']))}</div>
-              <div class="tag">Simulation only · candidate source</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    st.caption("Recommendations are decision support only. No firewall, WAF, API gateway, or real traffic policy was changed.")
-
-    st.subheader("Forecast Timeline")
-    timeline = []
-    for index, row in enumerate(network["forecasts"]):
-        decision = "Warning" if row["warning"] else "No warning"
-        classes = ["forecast-step"]
-        if index == 0:
-            classes.append("primary")
-        if row["warning"]:
-            classes.append("warning")
-        timeline.append(
-            f'<div class="{" ".join(classes)}"><div class="horizon">+{int(row["horizon_seconds"])}s</div><div class="score">{float(row["score"]):.6f}</div><div class="decision">{decision}</div></div>'
-        )
-    st.markdown(f'<div class="forecast-timeline">{"".join(timeline)}</div>', unsafe_allow_html=True)
-    st.caption("The +10s card is the primary operating horizon; later scores are direct K=5 forecast outputs.")
-
-    st.subheader("Forecast Score Trajectory")
-    chart = pd.DataFrame(
-        {
-            "Forecast Score": [float(row["score"]) for row in network["forecasts"]],
-            "Threshold": [float(network["threshold"])] * len(network["forecasts"]),
-        },
-        index=[f"+{int(row['horizon_seconds'])}s" for row in network["forecasts"]],
+    _render_operational_status(
+        warning=bool(primary["warning"]),
+        score=float(primary["score"]),
+        threshold=float(network["threshold"]),
+        context="Balanced operating mode · 10-state context",
+        reference_timestamp=str(network["reference_timestamp"]),
     )
-    st.line_chart(chart, y=["Forecast Score", "Threshold"], use_container_width=True)
+    _section("Network telemetry", "demo fixture coverage")
+    _metric_rail(
+        [
+            ("Network state", str(result["network_status"]), "current operating output"),
+            ("Valid states", str(result["state_count"]), "10 required for L=10"),
+            ("Candidate sources", str(len(prioritized)), "measured activity only"),
+            ("Processing", f'{float(result["processing_time_ms"]):.0f} ms', "backend execution"),
+        ]
+    )
 
-    _render_explanation(display_result)
+    _section("Forecast horizon", "+10s is the primary operating view")
+    _render_forecast_timeline(network["forecasts"], float(network["threshold"]))
+    _section("Forecast Score Trajectory", "direct K=5 outputs")
+    _render_forecast_chart(network["forecasts"], float(network["threshold"]))
+
+    left, right = st.columns([1.55, 1], gap="large")
+    with left:
+        _section("Source intelligence", "ranked candidate sources")
+        _render_source_cards(prioritized.to_dict(orient="records"))
+        st.caption("Priority is based on measured activity and forecast context. A candidate source is not a confirmed attacker; no traffic is automatically blocked.")
+    with right:
+        _section("Recommended response", "advisory action only")
+        _render_mitigation_cards(recommendations, prioritized.to_dict(orient="records"))
+        st.caption("No firewall, WAF, API gateway, or real traffic policy was changed.")
+
+    _section("System timeline", "how the result was produced")
+    _render_system_timeline(
+        [
+            ("Telemetry received", "deterministic event fixture"),
+            ("Network state", "10-second aggregation"),
+            ("Forecast calculated", "L=10 · K=5 LSTM"),
+            ("Sources prioritized", f"{len(prioritized)} candidate sources"),
+            ("Response recommended", "simulation only"),
+        ]
+    )
+    _render_explanation_panel(network["explanation"])
     with st.expander("Technical Details"):
         st.json(
             {
@@ -485,116 +594,55 @@ def _render_live_forecast(forecast: dict[str, object], state: dict[str, object])
     status = str(forecast.get("status", "WAITING_FOR_LIVE_HISTORY"))
     horizons = list(forecast.get("horizons") or [])
     if status == "WAITING_FOR_LIVE_HISTORY":
-        st.info(
-            f"WAITING FOR LIVE HISTORY · {int(state.get('buffer_size', 0))} / "
-            f"{int(state.get('buffer_required', 10))} states"
+        filled = int(state.get("buffer_size", 0))
+        required = int(state.get("buffer_required", 10))
+        st.markdown(
+            f'<div class="panel"><div class="eyebrow">Forecast engine / preparing</div>'
+            f'<div class="section-title" style="margin-top:.4rem">BUILDING FORECAST HISTORY</div>'
+            f'<div class="hero-foot"><span>Valid states <strong>{filled} / {required}</strong></span>'
+            '<span>Forecast becomes available after sufficient valid state history.</span></div></div>',
+            unsafe_allow_html=True,
         )
         return
     if status == "STALE_NOT_LIVE":
-        st.warning("DATA STALE · last forecast is retained for review and is not current live data")
+        st.markdown(
+            '<div class="panel" style="border-color:#80663f"><div class="eyebrow" style="color:#e9b45f">Data freshness</div>'
+            '<div class="section-title" style="margin-top:.4rem">DATA STALE</div>'
+            '<div class="disclaimer">The last forecast is retained for review and is not current live data.</div></div>',
+            unsafe_allow_html=True,
+        )
     if not horizons:
-        st.info("WAITING FOR LIVE HISTORY")
+        st.caption("WAITING FOR LIVE HISTORY")
         return
 
     primary = horizons[0]
-    primary_warning = bool(primary.get("warning"))
-    status_label = "Predictive warning" if primary_warning else "No predictive warning"
-    status_class = "" if primary_warning else "clear"
-    st.markdown(
-        f"""
-        <div class="integrated-status {status_class}">
-          <div class="eyebrow">LIVE NETWORK STATUS · PRIMARY +10 SECOND OUTLOOK</div>
-          <div class="status-title">{escape(status_label)}</div>
-          <div class="status-copy">Forecast Score {float(primary['score']):.6f} · Threshold {float(forecast.get('threshold') or 0):.2f}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    threshold = float(forecast.get("threshold") or 0)
+    _render_operational_status(
+        warning=bool(primary.get("warning")),
+        score=float(primary.get("score", 0.0)),
+        threshold=threshold,
+        context="live capture · L=10 history",
+        reference_timestamp=str(forecast.get("reference_timestamp") or "Unavailable"),
     )
-    metric_cols = st.columns(4)
-    for column, label, value in zip(
-        metric_cols,
-        ("Forecast Score", "Threshold", "Primary horizon", "Reference timestamp"),
-        (
-            f"{float(primary['score']):.6f}",
-            f"{float(forecast.get('threshold') or 0):.2f}",
-            "+10 seconds",
-            str(forecast.get("reference_timestamp") or "Unavailable"),
-        ),
-    ):
-        column.markdown(
-            f'<div class="summary-metric"><div class="label">{escape(label)}</div><div class="value">{escape(value)}</div></div>',
-            unsafe_allow_html=True,
-        )
-    st.caption("Forecast Score is the raw model output; it is not a calibrated probability.")
-
-    st.subheader("Forecast Timeline")
-    timeline = []
-    for index, row in enumerate(horizons):
-        warning = bool(row.get("warning"))
-        classes = ["forecast-step"]
-        if index == 0:
-            classes.append("primary")
-        if warning:
-            classes.append("warning")
-        decision = "Warning" if warning else "No warning"
-        timeline.append(
-            f'<div class="{" ".join(classes)}"><div class="horizon">+{int(row["horizon_seconds"])}s</div><div class="score">{float(row["score"]):.6f}</div><div class="decision">{decision}</div></div>'
-        )
-    st.markdown(f'<div class="forecast-timeline">{"".join(timeline)}</div>', unsafe_allow_html=True)
-    chart = pd.DataFrame(
-        {
-            "Forecast Score": [float(row["score"]) for row in horizons],
-            "Threshold": [float(forecast.get("threshold") or 0)] * len(horizons),
-        },
-        index=[f"+{int(row['horizon_seconds'])}s" for row in horizons],
-    )
-    st.line_chart(chart, y=["Forecast Score", "Threshold"], use_container_width=True)
+    _section("Forecast horizon", "+10s primary · direct K=5 outputs")
+    _render_forecast_timeline(horizons, threshold)
+    _section("Forecast Score Trajectory", "live score against operating threshold")
+    _render_forecast_chart(horizons, threshold)
     with st.expander("Explanation"):
         st.json(forecast.get("explanation") or {})
 
 
 def _render_live_sources(source_priorities: list[dict[str, object]], mitigation: dict[str, object]) -> None:
-    st.subheader("Source Priority")
-    if not source_priorities:
-        st.caption("No current candidate-source activity is available.")
-    else:
-        columns = st.columns(max(1, min(3, len(source_priorities[:6]))))
-        for column, row in zip(columns, source_priorities[:6]):
-            priority = str(row.get("priority", "LOW PRIORITY SOURCE"))
-            priority_class = "high" if priority.startswith("HIGH") else "medium" if priority.startswith("MEDIUM") else "low"
-            column.markdown(
-                f"""
-                <div class="source-card {priority_class}">
-                  <div class="source">{escape(str(row.get('source_ip', 'Unknown source')))}</div>
-                  <div class="priority">{escape(priority)}</div>
-                  <div class="reason">{escape(str(row.get('measured_reasons', 'Measured activity only')))}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    st.caption("Candidate-source priority is based on measured activity. It is not attacker attribution.")
-
-    st.subheader("Mitigation")
-    st.caption("Simulation only: TRUE · Recommendation only — no traffic is automatically blocked.")
-    recommendations = list(mitigation.get("recommendations") or [])
-    if recommendations:
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "Source": row.get("source_ip"),
-                        "Priority": row.get("priority"),
-                        "Recommendation": row.get("recommendation"),
-                        "Simulation only": row.get("simulation_only", True),
-                    }
-                    for row in recommendations[:6]
-                ]
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.caption("No mitigation recommendation is currently available.")
+    _section("Source intelligence", "live candidate-source activity")
+    _render_source_cards(source_priorities, limit=3)
+    st.caption("Candidate-source priority is based on measured activity. It is not attacker attribution; no traffic is automatically blocked.")
+    _section("Recommended response", "simulation only")
+    st.markdown(
+        '<div class="simulation-banner"><span><strong>SIMULATION ONLY: TRUE</strong> · recommendation-only response</span>'
+        '<span>AUTOMATIC BLOCKING DISABLED</span></div>',
+        unsafe_allow_html=True,
+    )
+    _render_mitigation_cards(list(mitigation.get("recommendations") or []), source_priorities)
 
 
 @st.fragment(run_every="2s")
@@ -627,6 +675,7 @@ def _render_live_runtime() -> None:
     }
     valid_states = int(state.get("valid_state_count", 0))
     required_states = int(state.get("buffer_required", 10))
+    _section("Live telemetry", f"{mode} · {interface}")
     cols = st.columns(6)
     for column, label, value in zip(
         cols,
@@ -700,14 +749,30 @@ def _render_live_runtime() -> None:
 def _render_telemetry_controls() -> None:
     """Render API-owned live telemetry, state, forecast, and policy outputs."""
 
-    st.subheader("Live Network Telemetry")
+    st.caption("Real packet capture mode. The dashboard never substitutes replay data for live telemetry.")
     _render_live_runtime()
 
 
 def main() -> None:
-    st.set_page_config(page_title="Network State Forecast", page_icon="🛡️", layout="wide")
+    st.set_page_config(page_title="Sentinel / Network Intelligence", page_icon="🛡️", layout="wide", initial_sidebar_state="expanded")
     _render_header()
-    mode = st.radio("Input mode", ["LIVE", "REPLAY", "MOCK / STATIC", "Full Integrated Demo"], horizontal=True)
+    st.sidebar.markdown(
+        '<div class="brand-lockup"><div class="brand-mark">WORKSPACE</div>'
+        '<div class="brand-name" style="font-size:1rem">Command center</div>'
+        '<div class="brand-sub">Analyst presentation surface</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown("<div class='eyebrow'>Navigation</div>", unsafe_allow_html=True)
+    mode = st.sidebar.radio(
+        "Workspace",
+        ["LIVE", "REPLAY", "MOCK / STATIC", "Full Integrated Demo"],
+        index=3,
+        label_visibility="collapsed",
+    )
+    st.sidebar.markdown("---")
+    st.sidebar.caption("Frozen contract")
+    st.sidebar.caption("10-second state cadence · L=10 · K=5")
+    st.sidebar.caption("Recommendation-only response")
     st.caption(
         {
             "LIVE": "LIVE · REAL CAPTURE",

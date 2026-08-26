@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Test-only dependencies required by FastAPI/Starlette's current TestClient.
+httpx2>=2.12,<3

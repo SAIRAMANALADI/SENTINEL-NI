@@ -21,3 +21,6 @@ models/*.pcapng
 *.gz
 *.bz2
 *.log
+frontend/node_modules
+frontend/.next
+frontend/tsconfig.tsbuildinfo

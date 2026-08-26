@@ -169,7 +169,7 @@ class LiveTelemetryAdapter(TelemetryAdapter):
         *,
         stale_after_seconds: int = 30,
         sniffer_factory: Callable[..., Any] | None = None,
-        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        event_callback: Callable[[dict[str, Any]], bool | None] | None = None,
         queue_size: int = 10_000,
     ) -> None:
         if isinstance(stale_after_seconds, bool) or stale_after_seconds <= 0:
@@ -187,6 +187,8 @@ class LiveTelemetryAdapter(TelemetryAdapter):
         self._last_event_at: datetime | None = None
         self._event_count = 0
         self._dropped_count = 0
+        self._callback_error_count = 0
+        self._callback_rejected_count = 0
         self._parse_error_count = 0
         self._parse_error_categories: Counter[str] = Counter()
         self._error: str | None = None
@@ -220,18 +222,23 @@ class LiveTelemetryAdapter(TelemetryAdapter):
         with self._lock:
             self._event_count += 1
             self._last_event_at = datetime.now(timezone.utc)
-        try:
-            self._queue.put_nowait(event)
-        except Full:
-            with self._lock:
-                self._dropped_count += 1
         if self._event_callback is not None:
             try:
-                self._event_callback(dict(event))
+                accepted = self._event_callback(dict(event))
+                if accepted is False:
+                    with self._lock:
+                        self._callback_rejected_count += 1
+                        self._dropped_count += 1
             except Exception:
                 with self._lock:
-                    self._parse_error_count += 1
-                    self._parse_error_categories["callback_error"] += 1
+                    self._callback_error_count += 1
+                    self._dropped_count += 1
+        else:
+            try:
+                self._queue.put_nowait(event)
+            except Full:
+                with self._lock:
+                    self._dropped_count += 1
 
     def start(self) -> None:
         with self._lock:
@@ -310,6 +317,8 @@ class LiveTelemetryAdapter(TelemetryAdapter):
                 "last_event_at": self._last_event_at.isoformat() if self._last_event_at else None,
                 "event_count": self._event_count,
                 "dropped_count": self._dropped_count,
+                "callback_error_count": self._callback_error_count,
+                "callback_rejected_count": self._callback_rejected_count,
                 "parse_error_count": self._parse_error_count,
                 "parse_error_categories": dict(self._parse_error_categories),
                 "stale": stale,

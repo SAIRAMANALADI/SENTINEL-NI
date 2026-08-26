@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import time
 import uuid
 from pathlib import Path
@@ -60,8 +61,8 @@ class Runtime:
         self.live_runtime = LiveRuntimeStore()
         self.telemetry = self._build_telemetry_adapter()
 
-    def _on_live_event(self, event: dict[str, Any]) -> None:
-        self.live_runtime.ingest_event(event)
+    def _on_live_event(self, event: dict[str, Any]) -> bool:
+        return self.live_runtime.ingest_event(event)
 
     def _build_telemetry_adapter(self) -> Any:
         if self.settings.telemetry_mode == "live":
@@ -143,12 +144,20 @@ class Runtime:
         status_payload.setdefault("stale", False)
         if self.settings.telemetry_mode == "live":
             status_payload["source_intervals_completed"] = self.live_runtime.source_intervals_completed
-        if status_payload.get("stale"):
+        status_value = str(status_payload.get("status", "STOPPED"))
+        running = status_value in {"RUNNING", "LIVE_RUNNING"} or bool(status_payload.get("started"))
+        if running and status_payload.get("stale"):
             status_payload["service_state"] = ServiceState.DATA_STALE.value
         elif not status_payload.get("available"):
             status_payload["service_state"] = ServiceState.TELEMETRY_UNAVAILABLE.value
         else:
             status_payload["service_state"] = ServiceState.HEALTHY.value
+        if running:
+            status_payload["freshness"] = "DATA STALE" if status_payload.get("stale") else "DATA FRESH"
+        elif status_payload.get("last_event_at"):
+            status_payload["freshness"] = f"LAST LIVE UPDATE: {status_payload['last_event_at']}"
+        else:
+            status_payload["freshness"] = "NOT CURRENT"
         return status_payload
 
     def start_telemetry(self) -> dict[str, Any]:
@@ -194,8 +203,23 @@ def _error_payload(code: str, message: str, request: Request, **details: Any) ->
 def create_app(settings: Settings | None = None) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     configure_logging(runtime_settings.log_level)
-    app = FastAPI(title="SIH26 Forecast Service", version="1.0.0", docs_url="/docs", redoc_url="/redoc")
-    app.state.runtime = Runtime(runtime_settings)
+    runtime = Runtime(runtime_settings)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            yield
+        finally:
+            runtime.telemetry.stop()
+
+    app = FastAPI(
+        title="SIH26 Forecast Service",
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        lifespan=lifespan,
+    )
+    app.state.runtime = runtime
 
     @app.middleware("http")
     async def request_middleware(request: Request, call_next: Any) -> Response:
@@ -206,6 +230,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime = request.app.state.runtime
         runtime.metrics.increment("request_count")
         try:
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    declared_bytes = int(content_length)
+                except ValueError:
+                    return JSONResponse(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        content=_error_payload("INVALID_CONTENT_LENGTH", "Content-Length must be an integer", request),
+                    )
+                if declared_bytes > runtime.settings.max_request_bytes:
+                    runtime.metrics.increment("request_too_large_count")
+                    return JSONResponse(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        content=_error_payload(
+                            "REQUEST_TOO_LARGE",
+                            "request body exceeds the configured limit",
+                            request,
+                            max_request_bytes=runtime.settings.max_request_bytes,
+                        ),
+                    )
             response = await call_next(request)
             if response.status_code >= 400:
                 runtime.metrics.increment("error_count")

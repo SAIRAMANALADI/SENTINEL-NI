@@ -51,6 +51,15 @@ def test_waiting_response_has_no_current_scores() -> None:
     assert snapshot["forecast"]["warning_states"] == []
 
 
+def test_running_response_marks_freshness_from_telemetry() -> None:
+    store = LiveRuntimeStore(inference_fn=_fake_inference)
+    fresh = store.snapshot({"status": "LIVE_RUNNING", "available": True, "event_count": 1, "stale": False})
+    stale = store.snapshot({"status": "LIVE_RUNNING", "available": True, "event_count": 1, "stale": True})
+
+    assert fresh["telemetry"]["freshness"] == "DATA FRESH"
+    assert stale["telemetry"]["freshness"] == "DATA STALE"
+
+
 def test_ready_response_has_a_full_buffer_and_scores() -> None:
     store = LiveRuntimeStore(inference_fn=_fake_inference)
     for index in range(11):
@@ -72,6 +81,28 @@ def test_stopped_response_is_not_current_live() -> None:
     assert snapshot["forecast"]["status"] == "STALE_NOT_LIVE"
     assert snapshot["forecast"]["stale"] is True
     assert snapshot["telemetry"]["readiness_state"] == "STALE"
+    assert snapshot["telemetry"]["freshness"] == "NOT CURRENT"
+
+
+def test_stopped_response_without_event_is_not_current() -> None:
+    store = LiveRuntimeStore(inference_fn=_fake_inference)
+    snapshot = store.snapshot({"status": "LIVE_STOPPED", "available": True, "event_count": 0})
+
+    assert snapshot["telemetry"]["freshness"] == "NOT CURRENT"
+
+
+def test_stopped_response_with_event_exposes_last_live_update() -> None:
+    store = LiveRuntimeStore(inference_fn=_fake_inference)
+    snapshot = store.snapshot(
+        {
+            "status": "LIVE_STOPPED",
+            "available": True,
+            "event_count": 1,
+            "last_event_at": "2026-08-25T12:00:00+00:00",
+        }
+    )
+
+    assert snapshot["telemetry"]["freshness"] == "LAST LIVE UPDATE: 2026-08-25T12:00:00+00:00"
 
 
 def test_packet_quality_fields_are_consistent() -> None:

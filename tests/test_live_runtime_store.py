@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pandas as pd
 
 from src.api.live_runtime import LiveRuntimeStore
@@ -105,3 +108,46 @@ def test_restart_resets_active_history_and_exposes_previous_result_as_stale() ->
     assert restarted["forecast"]["status"] == "WAITING_FOR_LIVE_HISTORY"
     assert restarted["forecast"]["horizons"] == []
     assert restarted["forecast"]["last_forecast"]["stale"] is True
+
+
+def test_out_of_order_event_is_rejected_without_latching_global_error() -> None:
+    store = LiveRuntimeStore(inference_fn=_fake_inference)
+    assert store.ingest_event(_packet(1)) is True
+    assert store.ingest_event(_packet(0)) is False
+
+    snapshot = store.snapshot(_running_status())
+    assert snapshot["state"]["accepted_event_count"] == 1
+    assert snapshot["state"]["rejected_event_count"] == 1
+    assert snapshot["state"]["rejected_event_categories"] == {"out_of_order": 1}
+    assert snapshot["last_error"] is None
+    assert snapshot["telemetry"]["readiness_state"] != "ERROR"
+
+
+def test_snapshot_is_not_blocked_while_model_inference_runs() -> None:
+    inference_started = threading.Event()
+    release_inference = threading.Event()
+
+    def blocking_inference(sequence: pd.DataFrame) -> dict[str, object]:
+        inference_started.set()
+        assert release_inference.wait(timeout=5)
+        return _fake_inference(sequence)
+
+    store = LiveRuntimeStore(inference_fn=blocking_inference)
+
+    def feed_history() -> None:
+        for index in range(10):
+            store.ingest_event(_packet(index))
+
+    worker = threading.Thread(target=feed_history)
+    worker.start()
+    assert inference_started.wait(timeout=5)
+
+    started = time.perf_counter()
+    snapshot = store.snapshot(_running_status())
+    elapsed = time.perf_counter() - started
+    release_inference.set()
+    worker.join(timeout=5)
+
+    assert elapsed < 0.5
+    assert snapshot["state"]["buffer_size"] == 10
+    assert not worker.is_alive()

@@ -8,6 +8,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, IPvAnyAddress, field_validator
 
 
+MAX_SOURCE_PRIORITY_EVENTS = 4096
+MAX_MITIGATION_SOURCES = 1024
+
+
 class StatePoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -72,7 +76,7 @@ class PacketEvent(BaseModel):
 class SourcePriorityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    events: list[PacketEvent] = Field(min_length=1)
+    events: list[PacketEvent] = Field(min_length=1, max_length=MAX_SOURCE_PRIORITY_EVENTS)
     forecast_score: FiniteFloat | None = None
     network_warning: bool | None = None
     reference_timestamp: datetime | None = None
@@ -95,7 +99,7 @@ class SourcePriorityInput(BaseModel):
 class MitigationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sources: list[SourcePriorityInput] = Field(min_length=1)
+    sources: list[SourcePriorityInput] = Field(min_length=1, max_length=MAX_MITIGATION_SOURCES)
 
 
 class MitigationResponse(BaseModel):
@@ -138,4 +142,3 @@ class MetricsResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: dict[str, Any]
-

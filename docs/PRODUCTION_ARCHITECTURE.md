@@ -18,9 +18,11 @@ API
    ↓
 DASHBOARD
 
-The current deployable boundary is an offline/replay MVP. MockTelemetryAdapter
-and ReplayTelemetryAdapter implement the telemetry interface. Live packet
-capture is intentionally not implemented.
+The current deployable boundary is a single-node production-like service. Mock
+and replay adapters remain available for deterministic demonstrations, while
+the live adapter supports metadata-only packet capture through Scapy/Npcap.
+Live operation still requires a host interface with capture permission and is
+not equivalent to a highly available production deployment.
 
 ## Component boundaries
 
@@ -71,7 +73,9 @@ capture is intentionally not implemented.
 
 ## Current prototype limitations
 
-- Telemetry is replay/mock only; no live packet capture is claimed.
+- Live capture is host-dependent and requires Scapy/Npcap, an exact interface,
+  and appropriate permissions; Docker Compose runs deterministic mock mode by
+  default.
 - PCAP attribution is not validated against the frozen flow artifact.
 - In-process metrics are local to one process and are not a distributed
   monitoring backend.
@@ -81,4 +85,3 @@ capture is intentionally not implemented.
   provider integration.
 - Docker deployment is production-like packaging, not proof of production
   infrastructure, penetration testing, or high availability.
-

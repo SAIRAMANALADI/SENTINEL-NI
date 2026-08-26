@@ -115,7 +115,7 @@ def save_checkpoint(
 
 
 def load_checkpoint(path: str | Path, device: str = "cpu") -> tuple[LSTMWorldModel, dict[str, Any]]:
-    checkpoint = torch.load(Path(path), map_location=device, weights_only=False)
+    checkpoint = torch.load(Path(path), map_location=device, weights_only=True)
     config = LSTMConfig(**checkpoint["config"])
     model = LSTMWorldModel(config)
     model.load_state_dict(checkpoint["state_dict"])

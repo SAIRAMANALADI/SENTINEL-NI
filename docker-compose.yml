@@ -1,5 +1,6 @@
 services:
   backend:
+    image: sih26-26153:rc
     build: .
     command: python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
     environment:
@@ -12,6 +13,10 @@ services:
       SIH_ADMIN_TOKEN: ${SIH_ADMIN_TOKEN:-}
       SIH_AUDIT_LOG_PATH: /app/results/audit/events.jsonl
       SIH_DEMO_EVENTS_PATH: /app/data/samples/final_demo_events.csv
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ./models:/app/models:ro
       - ./configs:/app/configs:ro
@@ -26,11 +31,16 @@ services:
       retries: 5
 
   dashboard:
+    image: sih26-26153:rc
     build: .
     command: python -m streamlit run app/streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
     environment:
       SIH_API_URL: http://backend:8000
       SIH_API_TOKEN: ${SIH_API_TOKEN:-}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - ./models:/app/models:ro
       - ./configs:/app/configs:ro
@@ -42,6 +52,28 @@ services:
       - "${DASHBOARD_PORT:-8501}:8501"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: sih26-26153-frontend:rc
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      BACKEND_URL: http://backend:8000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5

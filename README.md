@@ -4,7 +4,7 @@ Welcome team.
 
 This repository is the engineering foundation for SIH26-26153, **AI Based Network Attack Forecasting from Network Traffic Data**.
 
-The implemented prototype ingests CSE-CIC-IDS2018 flow data, constructs 10-second network states, builds day-aware temporal windows, forecasts future observed attack-state behavior, applies a validation-selected operating policy, and exposes the result through an offline CLI and Streamlit demo.
+The implemented system ingests CSE-CIC-IDS2018 flow data, constructs 10-second network states, builds day-aware temporal windows, forecasts future observed attack-state behavior, applies a validation-selected operating policy, and exposes the result through a standalone command-center frontend plus a Streamlit fallback.
 
 ## Current status
 
@@ -44,7 +44,8 @@ The training and inference paths are separated in [docs/ARCHITECTURE.md](docs/AR
 ```text
 data/       raw, processed, and small sample-data locations
 src/        ingestion, features, preprocessing, models, forecasting, MITRE, explainability
-app/        offline Streamlit dashboard
+app/        Streamlit fallback/internal development dashboard
+frontend/   primary standalone Next.js/React/TypeScript product UI
 configs/    versioned project configuration
 tests/      automated tests
 notebooks/  exploratory work kept separate from production code
@@ -79,6 +80,14 @@ Install the lightweight foundation dependencies with:
 python -m pip install -r requirements.txt
 ```
 
+For development and the complete test suite, install the declared development
+dependencies instead:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
 See [docs/PS_REQUIREMENT_MATRIX.md](docs/PS_REQUIREMENT_MATRIX.md) for requirement traceability and [docs/DECISIONS.md](docs/DECISIONS.md) for provisional architectural decisions.
 
 ## What the Prototype Does
@@ -86,6 +95,16 @@ See [docs/PS_REQUIREMENT_MATRIX.md](docs/PS_REQUIREMENT_MATRIX.md) for requireme
 The system observes recent network-state history and forecasts future attack-state behavior over multiple horizons. It uses 10-second states, a frozen K=5 LSTM development checkpoint, a validation-selected operating policy, and deterministic model-sensitivity explanations. The result is an offline Forecast Score and a Predictive warning/No predictive warning state—not an “attack detected” verdict.
 
 ## Demo
+
+Primary product UI (Docker Compose):
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://localhost:3000`. The frontend keeps LIVE telemetry and explicit deterministic REPLAY distinct. See [docs/FRONTEND_ARCHITECTURE.md](docs/FRONTEND_ARCHITECTURE.md).
+
+Fallback/internal Streamlit UI:
 
 ```bash
 streamlit run app/streamlit_app.py

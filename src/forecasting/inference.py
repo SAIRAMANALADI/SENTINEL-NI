@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,26 @@ DEFAULT_POLICY = PROJECT_ROOT / "configs" / "operating_policy.yaml"
 DEFAULT_SCHEMA = PROJECT_ROOT / "configs" / "state_feature_schema.yaml"
 TARGET_VERSION = "docs/TARGET_STATE_SPEC.md"
 REQUIRED_CONTEXT_COLUMNS = ["timestamp", "capture_day"]
+
+
+def _artifact_fingerprint(path: str | Path) -> tuple[str, int, int]:
+    resolved = Path(path).resolve(strict=True)
+    stat = resolved.stat()
+    return str(resolved), int(stat.st_size), int(stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=8)
+def _load_inference_bundle(
+    checkpoint_fingerprint: tuple[str, int, int],
+    preprocessor_fingerprint: tuple[str, int, int],
+    policy_fingerprint: tuple[str, int, int],
+    schema_fingerprint: tuple[str, int, int],
+) -> tuple[torch.nn.Module, dict[str, Any], BaselinePreprocessor, dict[str, Any], list[str], str]:
+    feature_columns, schema_version = _load_feature_contract(Path(schema_fingerprint[0]))
+    policy = load_policy(Path(policy_fingerprint[0]))
+    model, checkpoint = load_checkpoint(Path(checkpoint_fingerprint[0]), device="cpu")
+    preprocessor = BaselinePreprocessor.load(Path(preprocessor_fingerprint[0]))
+    return model, checkpoint, preprocessor, policy, feature_columns, schema_version
 
 
 def _load_feature_contract(schema_path: Path) -> tuple[list[str], str]:
@@ -148,15 +169,18 @@ def predict_network_state_sequence(
         raise ValueError("top_n must be a positive integer")
     total_started = time.perf_counter()
 
-    feature_columns, schema_version = _load_feature_contract(Path(schema_path))
-    policy = load_policy(policy_path)
+    model_started = time.perf_counter()
+    model, checkpoint, preprocessor, policy, feature_columns, schema_version = _load_inference_bundle(
+        _artifact_fingerprint(checkpoint_path),
+        _artifact_fingerprint(preprocessor_path),
+        _artifact_fingerprint(policy_path),
+        _artifact_fingerprint(schema_path),
+    )
+    model_load_ms = (time.perf_counter() - model_started) * 1000
     mode = policy.get("primary_mode")
     if not isinstance(mode, str) or mode not in policy["modes"]:
         raise ValueError("operating policy primary_mode is missing or invalid")
 
-    model_started = time.perf_counter()
-    model, checkpoint = load_checkpoint(checkpoint_path, device="cpu")
-    model_load_ms = (time.perf_counter() - model_started) * 1000
     if model.config.sequence_length != 10 or model.config.input_size != len(feature_columns):
         raise ValueError("checkpoint dimensions do not match the frozen 10-state, 17-feature contract")
     if model.config.output_size != 5:
@@ -166,7 +190,6 @@ def predict_network_state_sequence(
         raise ValueError("checkpoint feature order does not match the approved feature schema")
 
     frame, timestamps, capture_day = _validate_sequence(sequence, feature_columns, model.config.sequence_length)
-    preprocessor = BaselinePreprocessor.load(preprocessor_path)
     if preprocessor.feature_columns != feature_columns:
         raise ValueError("preprocessing artifact feature order does not match the approved schema")
     preprocessing_started = time.perf_counter()

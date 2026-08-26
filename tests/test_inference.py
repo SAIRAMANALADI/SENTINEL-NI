@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.forecasting import inference
 from src.forecasting.inference import predict_network_state_sequence
 
 
@@ -35,3 +36,20 @@ def test_model_reload_is_deterministic_on_cpu() -> None:
     assert [row["score"] for row in first["forecast"]] == [row["score"] for row in second["forecast"]]
     assert [row["warning"] for row in first["forecast"]] == [row["warning"] for row in second["forecast"]]
     assert first["model_checkpoint"].endswith("models\\lstm_multistep_k5.pt") or first["model_checkpoint"].endswith("models/lstm_multistep_k5.pt")
+
+
+def test_repeated_inference_reuses_validated_artifact_bundle(monkeypatch) -> None:
+    inference._load_inference_bundle.cache_clear()
+    original = inference.load_checkpoint
+    calls = 0
+
+    def counted_load(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(inference, "load_checkpoint", counted_load)
+    predict_network_state_sequence(_sample())
+    predict_network_state_sequence(_sample())
+
+    assert calls == 1

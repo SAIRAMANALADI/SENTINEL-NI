@@ -114,3 +114,56 @@ def test_stale_status_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter.start()
     adapter._started_at = datetime.now(timezone.utc) - timedelta(seconds=10)
     assert adapter.status()["stale"] is True
+
+
+def test_callback_mode_does_not_fill_unused_read_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "packet_to_event", lambda packet: {"timestamp": "2026-01-01T00:00:00+00:00"})
+    delivered: list[dict[str, object]] = []
+    adapter = live.LiveTelemetryAdapter(
+        "test-interface",
+        sniffer_factory=FakeSniffer,
+        event_callback=delivered.append,
+        queue_size=1,
+    )
+
+    adapter._on_packet(object())
+    adapter._on_packet(object())
+
+    assert len(delivered) == 2
+    assert adapter.read_event() is None
+    assert adapter.status()["dropped_count"] == 0
+
+
+def test_callback_failure_is_a_delivery_drop_not_a_parse_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "packet_to_event", lambda packet: {"timestamp": "2026-01-01T00:00:00+00:00"})
+
+    def reject(_: dict[str, object]) -> None:
+        raise RuntimeError("runtime unavailable")
+
+    adapter = live.LiveTelemetryAdapter(
+        "test-interface",
+        sniffer_factory=FakeSniffer,
+        event_callback=reject,
+    )
+    adapter._on_packet(object())
+
+    status = adapter.status()
+    assert status["dropped_count"] == 1
+    assert status["callback_error_count"] == 1
+    assert status["parse_error_count"] == 0
+
+
+def test_callback_rejection_is_counted_as_a_drop(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "packet_to_event", lambda packet: {"timestamp": "2026-01-01T00:00:00+00:00"})
+    adapter = live.LiveTelemetryAdapter(
+        "test-interface",
+        sniffer_factory=FakeSniffer,
+        event_callback=lambda event: False,
+    )
+
+    adapter._on_packet(object())
+
+    status = adapter.status()
+    assert status["dropped_count"] == 1
+    assert status["callback_rejected_count"] == 1
+    assert status["callback_error_count"] == 0

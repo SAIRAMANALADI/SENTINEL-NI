@@ -15,7 +15,7 @@ import pandas as pd
 from src.evaluation.mitigation_policy import recommendations_for_sources
 from src.features.network_state import FEATURE_COLUMNS, build_network_state_for_inference
 from src.forecasting.inference import predict_network_state_sequence
-from src.streaming.flow_builder import FlowBuilder
+from src.streaming.flow_builder import FlowBuilder, FlowBuilderError, FlowTableOverflowError
 from src.streaming.source_activity import SourceActivityAccumulator
 from src.streaming.source_forecast import prioritize_sources, prioritize_sources_with_forecast
 from src.streaming.state_aggregator import STATE_COLUMNS
@@ -68,6 +68,10 @@ class LiveRuntimeStore:
         self._state_keys: set[tuple[str, str]] = set()
         self._activity_frames: deque[pd.DataFrame] = deque(maxlen=self.max_activity_frames)
         self._event_count = 0
+        self._accepted_event_count = 0
+        self._rejected_event_count = 0
+        self._rejected_event_categories: dict[str, int] = {}
+        self._last_rejection_reason: str | None = None
         self._completed_flow_count = 0
         self._state_count = 0
         self._buffer_fill = 0
@@ -94,24 +98,31 @@ class LiveRuntimeStore:
         with self._lock:
             return len(self._activity_frames)
 
-    def ingest_event(self, event: Mapping[str, Any]) -> None:
+    def ingest_event(self, event: Mapping[str, Any]) -> bool:
         """Consume one real packet event; never retain the packet itself."""
 
+        pending_sequences: list[pd.DataFrame] = []
         with self._lock:
             self._startup_stage_timestamps.setdefault("first_event", datetime.now(timezone.utc).isoformat())
             self._event_count += 1
+            try:
+                completed = self._flow_builder.feed_event(event)
+            except (TypeError, ValueError, FlowBuilderError) as exc:
+                reason = str(exc)
+                category = "out_of_order" if "chronological" in reason else "invalid_flow_event"
+                self._rejected_event_count += 1
+                self._rejected_event_categories[category] = self._rejected_event_categories.get(category, 0) + 1
+                self._last_rejection_reason = reason
+                if isinstance(exc, FlowTableOverflowError):
+                    self._last_error = f"flow conversion: {exc}"
+                return False
+            self._accepted_event_count += 1
             try:
                 source_activity = self._source_accumulator.feed(event)
                 if source_activity is not None and not source_activity.empty:
                     self._activity_frames.append(source_activity.copy())
             except (TypeError, ValueError) as exc:
                 self._last_error = f"source activity: {exc}"
-
-            try:
-                completed = self._flow_builder.feed_event(event)
-            except (TypeError, ValueError) as exc:
-                self._last_error = f"flow conversion: {exc}"
-                return
             if int(self._flow_builder.status().get("created_flows", 0)) > 0:
                 self._startup_stage_timestamps.setdefault("flow_creation", datetime.now(timezone.utc).isoformat())
             for flow in completed:
@@ -120,19 +131,35 @@ class LiveRuntimeStore:
             if completed:
                 self._startup_stage_timestamps.setdefault("flow_closure", datetime.now(timezone.utc).isoformat())
             if completed:
-                self._refresh_states()
+                pending_sequences = self._refresh_states()
             self._refresh_source_outputs()
 
-    def _refresh_states(self) -> None:
+        for sequence in pending_sequences:
+            try:
+                result = dict(self._inference_fn(sequence))
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
+                with self._lock:
+                    self._last_error = f"live inference: {exc}"
+                continue
+            with self._lock:
+                self._last_forecast = result
+                self._forecast_update_count += 1
+                self._startup_stage_timestamps.setdefault("first_inference", datetime.now(timezone.utc).isoformat())
+                self._last_error = None
+                self._refresh_source_outputs()
+        return True
+
+    def _refresh_states(self) -> list[pd.DataFrame]:
+        pending_sequences: list[pd.DataFrame] = []
         if not self._completed_flows:
-            return
+            return pending_sequences
         self._startup_stage_timestamps.setdefault("state_generation", datetime.now(timezone.utc).isoformat())
         try:
             frame = pd.DataFrame(list(self._completed_flows))
             states, _ = build_network_state_for_inference(frame, self.interval_seconds)
         except (TypeError, ValueError, KeyError) as exc:
             self._last_error = f"state generation: {exc}"
-            return
+            return pending_sequences
         self._startup_stage_timestamps.setdefault("state_validation", datetime.now(timezone.utc).isoformat())
 
         for row in states.to_dict(orient="records"):
@@ -160,14 +187,8 @@ class LiveRuntimeStore:
             if self._buffer_fill >= self.sequence_length:
                 self._startup_stage_timestamps.setdefault("buffer_fill", datetime.now(timezone.utc).isoformat())
             if update.sequence is not None:
-                try:
-                    self._last_forecast = dict(self._inference_fn(update.sequence))
-                    self._forecast_update_count += 1
-                    self._startup_stage_timestamps.setdefault("first_inference", datetime.now(timezone.utc).isoformat())
-                    self._last_error = None
-                    self._refresh_source_outputs()
-                except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
-                    self._last_error = f"live inference: {exc}"
+                pending_sequences.append(update.sequence.copy())
+        return pending_sequences
 
     def _refresh_source_outputs(self) -> None:
         if not self._activity_frames:
@@ -245,7 +266,13 @@ class LiveRuntimeStore:
                 )
             telemetry_payload = _json_safe(dict(telemetry))
             telemetry_payload["flow_count"] = self._completed_flow_count
-            telemetry_payload["freshness"] = "DATA FRESH" if not telemetry_payload.get("stale") else "DATA STALE"
+            last_event_at = telemetry_payload.get("last_event_at")
+            if running:
+                telemetry_payload["freshness"] = "DATA STALE" if telemetry_payload.get("stale") else "DATA FRESH"
+            elif last_event_at:
+                telemetry_payload["freshness"] = f"LAST LIVE UPDATE: {last_event_at}"
+            else:
+                telemetry_payload["freshness"] = "NOT CURRENT"
             valid_events = max(int(telemetry_payload.get("event_count", 0) or 0), self._event_count)
             ignored_events = int(telemetry_payload.get("parse_error_count", 0) or 0)
             packets_seen = valid_events + ignored_events
@@ -266,6 +293,10 @@ class LiveRuntimeStore:
                     "latest_state_timestamp": self._latest_state_timestamp.isoformat() if self._latest_state_timestamp is not None else None,
                     "buffer_size": self._buffer_fill,
                     "buffer_required": self.sequence_length,
+                    "accepted_event_count": self._accepted_event_count,
+                    "rejected_event_count": self._rejected_event_count,
+                    "rejected_event_categories": dict(self._rejected_event_categories),
+                    "last_rejection_reason": self._last_rejection_reason,
                 },
                 "forecast": forecast,
                 "source_priorities": self._source_priorities,
