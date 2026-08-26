@@ -1,124 +1,126 @@
-# SIH26-26153 Foundation
+# Sentinel / NI
 
-Welcome team.
+**Predictive network intelligence for security operations.**
 
-This repository is the engineering foundation for SIH26-26153, **AI Based Network Attack Forecasting from Network Traffic Data**.
+Sentinel / NI turns network-flow telemetry into structured 10-second network states, forecasts near-term attack-state behavior, and gives operators a focused warning, source prioritization, mitigation recommendation, and model-sensitivity context.
 
-The implemented system ingests CSE-CIC-IDS2018 flow data, constructs 10-second network states, builds day-aware temporal windows, forecasts future observed attack-state behavior, applies a validation-selected operating policy, and exposes the result through a standalone command-center frontend plus a Streamlit fallback.
+It is designed around a simple operational question:
 
-## Current status
+> What is the network likely to look like next—and what should the operator look at first?
 
-Current verified state:
+## Current capabilities
 
-- CSE-CIC-IDS2018 four-day flow artifacts are locally acquired but excluded from Git;
-- 16,127 fixed 10-second network states with 17 flow-derived model features are available;
-- the approved target is `future_attack_state(t) = binary_attack_state(t + 10 seconds)` within the same `capture_day`;
-- train/validation/test days are 14-Feb + 21-Feb / 22-Feb / 28-Feb;
-- the frozen K=5 LSTM development checkpoint, preprocessing artifact, operating policy, CLI, and offline Streamlit dashboard are implemented;
-- packet-level PCAP enrichment remains blocked and is not fabricated.
+The current verified V1 system provides:
 
-The authoritative current contracts are [docs/NETWORK_STATE_SPEC.md](docs/NETWORK_STATE_SPEC.md), [docs/TARGET_STATE_SPEC.md](docs/TARGET_STATE_SPEC.md), [docs/WORLD_MODEL_SPEC.md](docs/WORLD_MODEL_SPEC.md), and [docs/INFERENCE_CONTRACT.md](docs/INFERENCE_CONTRACT.md).
+- CSE-CIC-IDS2018 multi-day flow ingestion;
+- 16,127 fixed 10-second network states;
+- 17 flow-derived model features;
+- a frozen K=5 temporal forecasting checkpoint;
+- day-aware train, validation, and test boundaries;
+- deterministic inference, operating-policy, source-prioritization, mitigation, and explanation outputs;
+- a standalone Next.js product interface and a Streamlit fallback/demo interface.
 
-## Architecture
+The approved target is `future_attack_state(t) = binary_attack_state(t + 10 seconds)` within the same `capture_day`. The current split uses 14-February and 21-February 2018 for training, 22-February for validation, and 28-February for the final test day.
 
-```text
-Traffic input -> ingestion -> feature extraction -> canonical schema
-              -> temporal windows -> baseline model -> temporal model
-              -> K-step forecasting -> attack-stage mapping
-              -> explainability -> offline dashboard
-```
+Packet-level PCAP enrichment is intentionally not fused into V1. The available archive cannot currently be matched to the flow artifact with defensible machine or five-tuple provenance, so packet features are not fabricated.
 
-The training and inference paths are separated in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The interface between network feature engineering and ML is defined in [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md).
-
-## Team ownership
-
-| Developer | Ownership |
-| --- | --- |
-| Developer 1 | ML, preprocessing, temporal windows, models, forecasting, evaluation |
-| Developer 2 | Ingestion, flow and packet features, canonical schema, labels, MITRE evidence |
-| Developer 3 | Offline dashboard, inference integration, visualization, demo packaging |
-| Developer 4 | QA, reproducibility, leakage and data audits, integration, documentation |
-
-## Repository layout
+## How Sentinel works
 
 ```text
-data/       raw, processed, and small sample-data locations
-src/        ingestion, features, preprocessing, models, forecasting, MITRE, explainability
-app/        Streamlit fallback/internal development dashboard
-frontend/   primary standalone Next.js/React/TypeScript product UI
-configs/    versioned project configuration
-tests/      automated tests
-notebooks/  exploratory work kept separate from production code
-models/     local model artifacts; checkpoints are ignored by Git
-results/    generated metrics and reports; generated artifacts are ignored
-docs/       contracts, decisions, audits, and runbooks
-scripts/    reproducibility and maintenance scripts
+Network flow telemetry
+        ↓
+Validated flow features
+        ↓
+10-second network states
+        ↓
+Temporal context window
+        ↓
+Multi-horizon forecast
+        ↓
+Warning · source priority · mitigation · explanation
 ```
 
-## Development rules
+The data and model boundary is defined by the versioned contracts in [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md), [docs/NETWORK_STATE_SPEC.md](docs/NETWORK_STATE_SPEC.md), [docs/TARGET_STATE_SPEC.md](docs/TARGET_STATE_SPEC.md), and [docs/INFERENCE_CONTRACT.md](docs/INFERENCE_CONTRACT.md).
 
-1. Keep one bounded task per branch or pull request.
-2. Treat the canonical data contract as a shared API; document interface changes.
-3. Do not commit raw or large datasets, secrets, checkpoints, or generated caches.
-4. Keep training separate from inference and use temporal/scenario-aware validation.
-5. Do not invent SIH requirements, attack chronology, metrics, or explanations.
-6. Do not start Transformer/GNN work before the baseline and first temporal model are working.
-7. Every new module must have focused tests and a reproducible command.
+## Repository structure
 
-## Foundation checks
+```text
+app/        Streamlit fallback and deterministic demo interface
+configs/    Versioned feature and runtime configuration
+data/       Raw, processed, and small sample-data locations
+docs/       Contracts, architecture notes, decisions, audits, and runbooks
+frontend/   Primary Next.js / React / TypeScript product interface
+models/     Local model artifacts; checkpoints are ignored by Git
+notebooks/  Exploratory work kept separate from production code
+results/    Generated reports and evaluation artifacts
+scripts/    Reproducibility, validation, and maintenance commands
+src/        Ingestion, features, forecasting, inference, MITRE, and explainability
+tests/      Automated tests
+```
 
-From this directory:
+Raw datasets, processed datasets, model checkpoints, generated caches, and other large artifacts are excluded from Git. They must be acquired or generated locally according to the relevant data and runbook documentation.
+
+## Run the primary interface
+
+From the repository root, start the product UI with Docker Compose:
 
 ```bash
-python scripts/smoke_test.py
-python -m pytest tests/test_project_structure.py
+docker compose up -d --build
 ```
 
-Install the lightweight foundation dependencies with:
+Open [http://localhost:3000](http://localhost:3000).
+
+Stop the services with:
+
+```bash
+docker compose down
+```
+
+The primary interface keeps live telemetry and deterministic replay visibly separate. See [docs/FRONTEND_ARCHITECTURE.md](docs/FRONTEND_ARCHITECTURE.md).
+
+## Run the Streamlit fallback
+
+Install the project dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-For development and the complete test suite, install the declared development
-dependencies instead:
+Then start the fallback interface:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+Use **Run Demo** to execute the deterministic local sequence at `data/samples/inference_demo_sequence.csv`, or upload a compatible 10-state sequence containing the approved 17 features, `timestamp`, and `capture_day` columns.
+
+## Validate the repository
+
+Install development dependencies and run the full test suite:
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-See [docs/PS_REQUIREMENT_MATRIX.md](docs/PS_REQUIREMENT_MATRIX.md) for requirement traceability and [docs/DECISIONS.md](docs/DECISIONS.md) for provisional architectural decisions.
-
-## What the Prototype Does
-
-The system observes recent network-state history and forecasts future attack-state behavior over multiple horizons. It uses 10-second states, a frozen K=5 LSTM development checkpoint, a validation-selected operating policy, and deterministic model-sensitivity explanations. The result is an offline Forecast Score and a Predictive warning/No predictive warning state—not an “attack detected” verdict.
-
-## Demo
-
-Primary product UI (Docker Compose):
+The lightweight foundation checks are:
 
 ```bash
-docker compose up -d --build
+python scripts/smoke_test.py
+python -m pytest tests/test_project_structure.py
 ```
 
-Open `http://localhost:3000`. The frontend keeps LIVE telemetry and explicit deterministic REPLAY distinct. See [docs/FRONTEND_ARCHITECTURE.md](docs/FRONTEND_ARCHITECTURE.md).
+## Operational language
 
-Fallback/internal Streamlit UI:
+Sentinel reports a **Forecast Score** and a **Predictive Warning** or **No Predictive Warning** state. The score is a model output, not a calibrated probability. The product does not claim that an attack has been detected, and recommendations are decision support rather than autonomous response.
 
-```bash
-streamlit run app/streamlit_app.py
-```
+## Further reading
 
-Use **Run Demo** to execute the deterministic local sample through validation, inference, policy, forecasting, and explanation.
-
-## Run the Demo
-
-Install the project dependencies, then start the offline Streamlit dashboard:
-
-```bash
-python -m pip install -r requirements.txt
-streamlit run app/streamlit_app.py
-```
-
-Use **Run Demo** to execute the deterministic fixture at `data/samples/inference_demo_sequence.csv`, or upload a compatible 10-state sequence containing the approved 17 features, `timestamp`, and `capture_day` columns. The dashboard consumes `predict_network_state_sequence()` from `src/forecasting/inference.py`; it does not train models or implement preprocessing independently.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Network-state specification](docs/NETWORK_STATE_SPEC.md)
+- [Target-state specification](docs/TARGET_STATE_SPEC.md)
+- [World-model specification](docs/WORLD_MODEL_SPEC.md)
+- [Inference contract](docs/INFERENCE_CONTRACT.md)
+- [Frontend architecture](docs/FRONTEND_ARCHITECTURE.md)
+- [Requirement matrix](docs/PS_REQUIREMENT_MATRIX.md)
+- [Architecture decisions](docs/DECISIONS.md)
