@@ -10,7 +10,7 @@ Inspection mode: read-only; header-first and streamed row audit
 The real CSV is present and structurally readable at:
 
 ```text
-C:\Users\saira\OneDrive\Desktop\MyProps\SIH26\1\Wednesday-28-02-2018_TrafficForML_CICFlowMeter.csv
+<local-repository-root>/Wednesday-28-02-2018_TrafficForML_CICFlowMeter.csv
 ```
 
 It is not at the previously expected `data/raw/cse-cic-ids2018/flow/` path in this workspace. The raw file was not modified. The file is usable for a baseline only after a derived ingestion step handles the embedded repeated headers and non-finite numeric values.

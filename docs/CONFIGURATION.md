@@ -16,7 +16,8 @@ source code.
 | SIH_TELEMETRY_INTERFACE | unset | Exact discovered interface name required for live |
 | SIH_TELEMETRY_REPLAY_PATH | data/samples/inference_demo_sequence.csv | Replay source |
 | SIH_TELEMETRY_STALE_AFTER_SECONDS | 30 | Freshness window for live status |
-| SIH_AUTH_ENABLED | false | Enable bearer-token auth |
+| SIH_ENV | development | `development`, `test`, or fail-closed `production` |
+| SIH_AUTH_ENABLED | false | Enable bearer-token auth; required in production |
 | SIH_VIEWER_TOKEN | unset | Development-provided viewer token |
 | SIH_OPERATOR_TOKEN | unset | Development-provided operator token |
 | SIH_ADMIN_TOKEN | unset | Development-provided admin token |

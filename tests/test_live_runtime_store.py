@@ -98,16 +98,20 @@ def test_stop_marks_last_forecast_stale_without_deleting_it() -> None:
 
 def test_restart_resets_active_history_and_exposes_previous_result_as_stale() -> None:
     store = LiveRuntimeStore(inference_fn=_fake_inference)
+    first_session = store.session_id
     for index in range(10):
         store.ingest_event(_packet(index))
     store.start_session()
 
     restarted = store.snapshot(_running_status())
+    assert restarted["session_id"] != first_session
+    assert restarted["forecast"]["session_id"] == restarted["session_id"]
     assert restarted["state"]["valid_state_count"] == 0
     assert restarted["state"]["buffer_size"] == 0
     assert restarted["forecast"]["status"] == "WAITING_FOR_LIVE_HISTORY"
     assert restarted["forecast"]["horizons"] == []
     assert restarted["forecast"]["last_forecast"]["stale"] is True
+    assert restarted["forecast"]["last_forecast"]["session_id"] == first_session
 
 
 def test_out_of_order_event_is_rejected_without_latching_global_error() -> None:

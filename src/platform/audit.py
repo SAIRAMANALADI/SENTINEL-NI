@@ -24,6 +24,7 @@ class AuditLogger:
         forecast_warning: bool | None = None,
         candidate_source: str | None = None,
         mitigation_recommendation: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         record: dict[str, Any] = {
             "event_id": str(uuid.uuid4()),
@@ -36,8 +37,9 @@ class AuditLogger:
             "mitigation_recommendation": mitigation_recommendation,
             "simulation_only": True,
         }
+        if session_id is not None:
+            record["session_id"] = str(session_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, allow_nan=False) + "\n")
         return record
-

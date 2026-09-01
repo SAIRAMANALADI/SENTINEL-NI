@@ -47,6 +47,7 @@ class Settings:
     telemetry_replay_path: Path | None = None
     telemetry_stale_after_seconds: int = 30
     max_request_bytes: int = 2_000_000
+    environment: str = "development"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -66,6 +67,9 @@ class Settings:
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("SIH_LOG_LEVEL is not a supported logging level")
 
+        environment = os.getenv("SIH_ENV", "development").strip().lower()
+        if environment not in {"development", "test", "production"}:
+            raise ValueError("SIH_ENV must be development, test, or production")
         auth_enabled = _env_bool("SIH_AUTH_ENABLED", False)
         max_request_bytes_raw = os.getenv("SIH_MAX_REQUEST_BYTES", "2000000")
         try:
@@ -79,6 +83,8 @@ class Settings:
         }
         if auth_enabled and not any(tokens.values()):
             raise ValueError("authentication is enabled but no role token is configured")
+        if environment == "production" and not auth_enabled:
+            raise ValueError("production configuration requires SIH_AUTH_ENABLED=true")
 
         return cls(
             api_host=os.getenv("SIH_API_HOST", "0.0.0.0"),
@@ -108,6 +114,7 @@ class Settings:
             ),
             telemetry_stale_after_seconds=int(os.getenv("SIH_TELEMETRY_STALE_AFTER_SECONDS", "30")),
             max_request_bytes=max_request_bytes,
+            environment=environment,
         )
 
     def validate(self) -> None:
@@ -122,6 +129,14 @@ class Settings:
             raise ValueError("telemetry_stale_after_seconds must be positive")
         if self.max_request_bytes <= 0:
             raise ValueError("max_request_bytes must be positive")
+        if self.environment not in {"development", "test", "production"}:
+            raise ValueError("environment must be development, test, or production")
+        if self.environment == "production":
+            if not self.auth_enabled:
+                raise ValueError("production configuration requires authentication")
+            missing_roles = [role for role, token in self.role_tokens().items() if not token]
+            if missing_roles:
+                raise ValueError(f"production authentication is missing role tokens: {missing_roles}")
 
     def role_tokens(self) -> dict[str, str | None]:
         return {"viewer": self.viewer_token, "operator": self.operator_token, "admin": self.admin_token}

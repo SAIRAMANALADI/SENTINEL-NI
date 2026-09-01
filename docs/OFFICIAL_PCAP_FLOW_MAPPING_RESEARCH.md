@@ -35,7 +35,7 @@ This is authoritative evidence that `172.31.69.24` is in the documented 28-Febru
 Archive path:
 
 ```text
-C:\Users\saira\data\raw\cse-cic-ids2018\pcap\pcap.zip
+<local-data-root>/cse-cic-ids2018/pcap/pcap.zip
 ```
 
 The ZIP central directory was inspected without extraction:

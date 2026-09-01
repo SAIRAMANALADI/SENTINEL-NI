@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from threading import RLock
 import time
+import uuid
 from typing import Any
 
 import numpy as np
@@ -53,6 +54,7 @@ class LiveRuntimeStore:
         self._lock = RLock()
         self._last_forecast: dict[str, Any] | None = None
         self._stale_forecast: dict[str, Any] | None = None
+        self._stale_forecast_session_id: str | None = None
         self._last_error: str | None = None
         self._reset_active_state()
 
@@ -80,6 +82,7 @@ class LiveRuntimeStore:
         self._source_priorities: list[dict[str, Any]] = []
         self._mitigation_recommendations: list[dict[str, Any]] = []
         self._session_started_at = datetime.now(timezone.utc).isoformat()
+        self._session_id = str(uuid.uuid4())
         self._session_started_monotonic = time.perf_counter()
         self._startup_stage_timestamps: dict[str, str] = {}
 
@@ -89,6 +92,7 @@ class LiveRuntimeStore:
         with self._lock:
             if self._last_forecast is not None:
                 self._stale_forecast = dict(self._last_forecast)
+                self._stale_forecast_session_id = self._session_id
             self._last_forecast = None
             self._reset_active_state()
             self._last_error = None
@@ -97,6 +101,13 @@ class LiveRuntimeStore:
     def source_intervals_completed(self) -> int:
         with self._lock:
             return len(self._activity_frames)
+
+    @property
+    def session_id(self) -> str:
+        """Return the identifier for the currently active live history."""
+
+        with self._lock:
+            return self._session_id
 
     def ingest_event(self, event: Mapping[str, Any]) -> bool:
         """Consume one real packet event; never retain the packet itself."""
@@ -219,15 +230,22 @@ class LiveRuntimeStore:
             self._last_error = f"source prioritization: {exc}"
 
     @staticmethod
-    def _forecast_payload(result: dict[str, Any], *, status: str, stale: bool) -> dict[str, Any]:
+    def _forecast_payload(
+        result: dict[str, Any], *, status: str, stale: bool, session_id: str | None = None
+    ) -> dict[str, Any]:
         rows = [dict(row) for row in result.get("forecast", [])]
         scores = [float(row["score"]) for row in rows]
         warnings = [bool(row["warning"]) for row in rows]
         return {
             "status": status,
             "stale": stale,
+            "session_id": session_id,
             "reference_timestamp": result.get("reference_timestamp"),
             "model_version": result.get("model_version"),
+            "feature_schema_version": result.get("feature_schema_version"),
+            "target_version": result.get("target_version"),
+            "policy_version": result.get("policy_version"),
+            "forecast_horizon_seconds": result.get("forecast_horizon_seconds", 50),
             "sequence_length": 10,
             "horizons": _json_safe(rows),
             "forecast_scores": scores,
@@ -243,11 +261,17 @@ class LiveRuntimeStore:
             running = status == "LIVE_RUNNING"
             if self._last_forecast is not None:
                 forecast_status = "READY" if running else "STALE_NOT_LIVE"
-                forecast = self._forecast_payload(self._last_forecast, status=forecast_status, stale=not running)
+                forecast = self._forecast_payload(
+                    self._last_forecast,
+                    status=forecast_status,
+                    stale=not running,
+                    session_id=self._session_id,
+                )
             else:
                 forecast = {
                     "status": "WAITING_FOR_LIVE_HISTORY",
                     "stale": False,
+                    "session_id": self._session_id,
                     "reference_timestamp": None,
                     "model_version": None,
                     "sequence_length": self.sequence_length,
@@ -263,6 +287,7 @@ class LiveRuntimeStore:
                     self._stale_forecast,
                     status="STALE_NOT_LIVE",
                     stale=True,
+                    session_id=self._stale_forecast_session_id,
                 )
             telemetry_payload = _json_safe(dict(telemetry))
             telemetry_payload["flow_count"] = self._completed_flow_count
@@ -287,6 +312,7 @@ class LiveRuntimeStore:
             }
             telemetry_payload["readiness_state"] = self._readiness_state(status, telemetry_payload)
             return {
+                "session_id": self._session_id,
                 "telemetry": telemetry_payload,
                 "state": {
                     "valid_state_count": self._state_count,

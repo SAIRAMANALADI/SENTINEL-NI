@@ -1,6 +1,8 @@
 # Sentinel / NI
 
-**Predictive network intelligence for security operations.**
+**An open-source real-time network security platform for short-horizon
+attack-state forecasting, source prioritization, and defensive decision
+support.**
 
 Sentinel / NI turns network-flow telemetry into structured 10-second network states, forecasts near-term attack-state behavior, and gives operators a focused warning, source prioritization, mitigation recommendation, and model-sensitivity context.
 
@@ -27,18 +29,43 @@ Packet-level PCAP enrichment is intentionally not fused into V1. The available a
 ## How Sentinel works
 
 ```text
-Network flow telemetry
-        ↓
-Validated flow features
-        ↓
-10-second network states
-        ↓
-Temporal context window
-        ↓
-Multi-horizon forecast
-        ↓
-Warning · source priority · mitigation · explanation
+NETWORK
+   ↓
+PACKETS → FLOWS → NETWORK STATES
+                         ↓
+                    L=10 history
+                         ↓
+                    LSTM K=5
+                         ↓
+                    FORECAST
+                  ↙      ↓       ↘
+       SOURCE PRIORITY  MITIGATION  API
+                                      ↓
+                                  DASHBOARD
 ```
+
+The current release has two operating surfaces. **Replay Mode** runs the
+deterministic local demonstration path for repeatable evaluation. **Live Mode**
+reads metadata visible on one explicitly configured host interface and begins
+forecasting only after a valid ten-state history is available. The backend owns
+the processing session; the browser does not capture packets or run inference.
+
+## Model and Forecast Score
+
+The serving model is the frozen LSTM K=5 checkpoint over a ten-state, ten-second
+history. It emits five direct horizons at +10, +20, +30, +40, and +50 seconds.
+Each result is a **Forecast Score**, not a calibrated probability. The operating
+policy presents **Predictive Warning** or **No Predictive Warning** according to
+the configured threshold.
+
+## Source Prioritization and Mitigation
+
+Sentinel ranks observed **Candidate Sources** by measured activity signals so
+an operator can decide what to review first. A **Source Priority** is review
+evidence, not attacker identification. **Mitigation** is a separate,
+recommendation-only output; the current release never changes firewall rules or
+automatically blocks traffic. Demo responses keep **Simulation Only: TRUE**
+visible.
 
 The data and model boundary is defined by the versioned contracts in [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md), [docs/NETWORK_STATE_SPEC.md](docs/NETWORK_STATE_SPEC.md), [docs/TARGET_STATE_SPEC.md](docs/TARGET_STATE_SPEC.md), and [docs/INFERENCE_CONTRACT.md](docs/INFERENCE_CONTRACT.md).
 
@@ -94,6 +121,21 @@ streamlit run app/streamlit_app.py
 
 Use **Run Demo** to execute the deterministic local sequence at `data/samples/inference_demo_sequence.csv`, or upload a compatible 10-state sequence containing the approved 17 features, `timestamp`, and `capture_day` columns.
 
+## Configuration and API
+
+Runtime configuration is environment-driven. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) and
+[docs/REPRODUCIBLE_INSTALLATION.md](docs/REPRODUCIBLE_INSTALLATION.md) for
+fresh-environment commands. The FastAPI service exposes `/api/v1/health`,
+`/api/v1/ready`, `/api/v1/live`, `/api/v1/forecast`, source prioritization,
+mitigation recommendations, and telemetry controls. API documentation is
+available at `/docs` in development and disabled in production.
+
+The model serves a frozen 17-feature, 10-second, L=10, K=5 contract. Source
+prioritization is candidate-source review evidence, and mitigation is
+recommendation-only with no automatic blocking. See the model, forecasting,
+source, and mitigation documents under `docs/` for the exact boundaries.
+
 ## Validate the repository
 
 Install development dependencies and run the full test suite:
@@ -114,6 +156,24 @@ python -m pytest tests/test_project_structure.py
 
 Sentinel reports a **Forecast Score** and a **Predictive Warning** or **No Predictive Warning** state. The score is a model output, not a calibrated probability. The product does not claim that an attack has been detected, and recommendations are decision support rather than autonomous response.
 
+## Live operation and security
+
+Live mode monitors only traffic visible to the explicitly configured sensor
+interface. The backend owns one shared runtime for all dashboard readers; the
+browser never starts a second packet sniffer or runs a second model pipeline.
+See [docs/LIVE_OPERATION.md](docs/LIVE_OPERATION.md),
+[docs/REALTIME_PRODUCT_ARCHITECTURE.md](docs/REALTIME_PRODUCT_ARCHITECTURE.md),
+[docs/PRIVACY.md](docs/PRIVACY.md), and [SECURITY.md](SECURITY.md) before
+exposing the service.
+
+Production configuration fails closed when authentication is disabled. Local
+development may use the default development profile, but an exposed
+deployment must set `SIH_ENV=production`, enable authentication, and provide
+all three role tokens. This open-source release is governed by the [MIT
+License](LICENSE) for project-owned code.
+Datasets, PCAPs, and model artifacts remain separately governed and are not
+redistributed by this repository.
+
 ## Further reading
 
 - [Architecture](docs/ARCHITECTURE.md)
@@ -124,3 +184,27 @@ Sentinel reports a **Forecast Score** and a **Predictive Warning** or **No Predi
 - [Frontend architecture](docs/FRONTEND_ARCHITECTURE.md)
 - [Requirement matrix](docs/PS_REQUIREMENT_MATRIX.md)
 - [Architecture decisions](docs/DECISIONS.md)
+- [Real-time product architecture](docs/REALTIME_PRODUCT_ARCHITECTURE.md)
+- [Live operation](docs/LIVE_OPERATION.md)
+- [Security policy](SECURITY.md)
+- [Privacy and retention](docs/PRIVACY.md)
+- [Current limitations](docs/LIMITATIONS.md)
+
+## Roadmap
+
+The next release can add longer live soak evidence, stronger runtime
+observability, drift monitoring, broader telemetry adapters, and an
+authoritative PCAP-to-flow attribution path. Automatic enforcement, enterprise
+identity, and high availability require separate security and deployment work.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation
+commands, and scope boundaries. Please do not submit datasets, PCAPs, model
+checkpoints, secrets, or private traffic captures.
+
+## License
+
+Project-owned code is released under the [MIT License](LICENSE). Dataset,
+PCAP, and model-artifact terms are separate; contributors must have the right
+to share anything they submit.

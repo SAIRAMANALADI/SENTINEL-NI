@@ -58,6 +58,7 @@ class Runtime:
         self.metrics = MetricsRegistry()
         self.audit = AuditLogger(settings.audit_log_path)
         self._readiness: dict[str, Any] | None = None
+        self._static_readiness: dict[str, Any] | None = None
         self.live_runtime = LiveRuntimeStore()
         self.telemetry = self._build_telemetry_adapter()
 
@@ -77,32 +78,34 @@ class Runtime:
         return MockTelemetryAdapter()
 
     def readiness(self, *, refresh: bool = False) -> dict[str, Any]:
-        if self._readiness is not None and not refresh:
-            return self._readiness
-        checks = {"configuration": False, "schema": False, "policy": False, "model": False, "telemetry": False}
-        reasons: list[str] = []
-        try:
-            self.settings.validate()
-            checks["configuration"] = True
-        except (FileNotFoundError, ValueError) as exc:
-            reasons.append(str(exc))
-        try:
-            _load_feature_contract(self.settings.feature_schema_path)
-            checks["schema"] = True
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
-            reasons.append(f"schema: {exc}")
-        try:
-            load_policy(self.settings.operating_policy_path)
-            checks["policy"] = True
-        except (OSError, ValueError, TypeError, yaml.YAMLError, KeyError) as exc:
-            reasons.append(f"policy: {exc}")
-        try:
-            model, _ = load_checkpoint(self.settings.model_path, device="cpu")
-            checks["model"] = bool(model.config.sequence_length == 10 and model.config.input_size == 17)
-            if not checks["model"]:
-                reasons.append("model dimensions do not match the frozen 10-state/17-feature contract")
-        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-            reasons.append(f"model: {exc}")
+        if self._static_readiness is None or refresh:
+            checks = {"configuration": False, "schema": False, "policy": False, "model": False}
+            reasons: list[str] = []
+            try:
+                self.settings.validate()
+                checks["configuration"] = True
+            except (FileNotFoundError, ValueError) as exc:
+                reasons.append(str(exc))
+            try:
+                _load_feature_contract(self.settings.feature_schema_path)
+                checks["schema"] = True
+            except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+                reasons.append(f"schema: {exc}")
+            try:
+                load_policy(self.settings.operating_policy_path)
+                checks["policy"] = True
+            except (OSError, ValueError, TypeError, yaml.YAMLError, KeyError) as exc:
+                reasons.append(f"policy: {exc}")
+            try:
+                model, _ = load_checkpoint(self.settings.model_path, device="cpu")
+                checks["model"] = bool(model.config.sequence_length == 10 and model.config.input_size == 17)
+                if not checks["model"]:
+                    reasons.append("model dimensions do not match the frozen 10-state/17-feature contract")
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+                reasons.append(f"model: {exc}")
+            self._static_readiness = {"checks": checks, "reasons": reasons}
+        checks = dict(self._static_readiness["checks"])
+        reasons = list(self._static_readiness["reasons"])
         telemetry_status = self.telemetry.status()
         checks["telemetry"] = bool(telemetry_status.get("available"))
         if not checks["telemetry"]:
@@ -144,6 +147,7 @@ class Runtime:
         status_payload.setdefault("stale", False)
         if self.settings.telemetry_mode == "live":
             status_payload["source_intervals_completed"] = self.live_runtime.source_intervals_completed
+            status_payload["session_id"] = self.live_runtime.session_id
         status_value = str(status_payload.get("status", "STOPPED"))
         running = status_value in {"RUNNING", "LIVE_RUNNING"} or bool(status_payload.get("started"))
         if running and status_payload.get("stale"):
@@ -167,6 +171,14 @@ class Runtime:
                 detail={"code": "LIVE_MODE_REQUIRED", "message": "set SIH_TELEMETRY_MODE=live before starting capture"},
             )
         try:
+            telemetry_before_start = self.telemetry.status()
+            already_running = telemetry_before_start.get("status") == "LIVE_RUNNING" or bool(
+                telemetry_before_start.get("started")
+            )
+            if not already_running:
+                # Reset before starting the sniffer so packets captured
+                # immediately during adapter.start() belong to this session.
+                self.live_runtime.start_session()
             self.telemetry.start()
         except LiveTelemetryPermissionDenied as exc:
             raise HTTPException(
@@ -178,7 +190,6 @@ class Runtime:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": "CAPTURE_UNAVAILABLE", "message": str(exc)},
             ) from exc
-        self.live_runtime.start_session()
         return self.telemetry_status()
 
     def stop_telemetry(self) -> dict[str, Any]:
@@ -215,8 +226,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="SIH26 Forecast Service",
         version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=None if runtime_settings.environment == "production" else "/docs",
+        redoc_url=None if runtime_settings.environment == "production" else "/redoc",
         lifespan=lifespan,
     )
     app.state.runtime = runtime
@@ -251,6 +262,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ),
                     )
             response = await call_next(request)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
             if response.status_code >= 400:
                 runtime.metrics.increment("error_count")
             return response
@@ -341,6 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model_version=result["model_version"],
             policy_version=result["policy_version"],
             forecast_warning=warning,
+            session_id=runtime.live_runtime.session_id,
         )
         return ForecastResponse(**result)
 
@@ -364,6 +379,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 policy_version="operating-policy-v1",
                 forecast_warning=bool(row.get("forecast_context", {}).get("network_warning")),
                 candidate_source=str(row.get("source_ip")),
+                session_id=runtime.live_runtime.session_id,
             )
         return SourcePriorityResponse(**result)
 
@@ -387,6 +403,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 policy_version="operating-policy-v1",
                 candidate_source=str(row.get("source_ip")),
                 mitigation_recommendation=str(row.get("recommendation")),
+                session_id=runtime.live_runtime.session_id,
             )
         return MitigationResponse(**result)
 

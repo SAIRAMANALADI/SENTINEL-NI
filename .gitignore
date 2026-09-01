@@ -46,6 +46,14 @@ models/*
 !models/.gitkeep
 results/*
 !results/.gitkeep
+!results/OPEN_SOURCE_RELEASE_BASELINE.md
+!results/OPEN_SOURCE_SECURITY_AUDIT.md
+!results/CLEAN_INSTALLATION_VALIDATION.md
+!results/REALTIME_SOAK_TEST.md
+!results/OPEN_SOURCE_V0_1_RELEASE_REPORT.md
+!results/FINAL_V0_1_RELEASE_CHECK.md
+!results/FINAL_V0_1_FREEZE_REPORT.md
+!results/PUBLIC_REPOSITORY_AUDIT.md
 *.ckpt
 *.pt
 *.pth
@@ -65,3 +73,6 @@ frontend/.next/
 frontend/tsconfig.tsbuildinfo
 *.log
 *.tmp
+
+# Local architecture-analysis output; never ship generated graph artifacts.
+graphify-out/

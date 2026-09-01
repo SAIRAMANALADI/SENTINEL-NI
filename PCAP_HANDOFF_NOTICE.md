@@ -10,7 +10,7 @@ packet-level analysis.
 
 ## Archive
 
-- **Local path:** `C:\Users\saira\data\raw\cse-cic-ids2018\pcap\pcap.zip`
+- **Local path:** `<local-data-root>/cse-cic-ids2018/pcap/pcap.zip`
 - **Compressed member-size total:** `53,251,610,825` bytes (about 53.25 GB)
 - **Verified archive members:** 437 PCAP captures
 - **Capture day:** 2018-02-28

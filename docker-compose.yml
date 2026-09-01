@@ -6,6 +6,7 @@ services:
     environment:
       SIH_API_HOST: 0.0.0.0
       SIH_API_PORT: 8000
+      SIH_ENV: ${SIH_ENV:-development}
       SIH_TELEMETRY_MODE: mock
       SIH_AUTH_ENABLED: ${SIH_AUTH_ENABLED:-false}
       SIH_VIEWER_TOKEN: ${SIH_VIEWER_TOKEN:-}

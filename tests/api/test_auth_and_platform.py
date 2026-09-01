@@ -1,5 +1,6 @@
 """Authentication, authorization, telemetry, audit, and configuration tests."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -93,12 +94,21 @@ def test_audit_and_metrics_are_safe(tmp_path: Path) -> None:
     )
     assert record["simulation_only"] is True
     assert '"simulation_only": true' in path.read_text(encoding="utf-8")
-
     metrics = MetricsRegistry()
     metrics.increment("request_count")
     metrics.observe("inference_latency", 12.5)
     assert metrics.snapshot()["counters"]["request_count"] == 1
     assert metrics.snapshot()["latencies"]["inference_latency"]["last_ms"] == 12.5
+
+
+def test_production_configuration_fails_closed_without_authentication(tmp_path: Path) -> None:
+    settings = replace(_settings(tmp_path), environment="production", auth_enabled=False)
+    try:
+        settings.validate()
+    except ValueError as exc:
+        assert "authentication" in str(exc).lower()
+    else:  # pragma: no cover - protects the fail-closed contract
+        raise AssertionError("production configuration must require authentication")
 
 
 def test_metrics_latency_storage_is_constant_size() -> None:
