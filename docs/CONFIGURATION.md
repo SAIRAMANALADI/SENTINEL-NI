@@ -25,6 +25,10 @@ source code.
 | SIH_DEMO_EVENTS_PATH | data/samples/final_demo_events.csv | Demo-only fixture |
 | SIH_API_URL | http://localhost:8000 | Streamlit backend URL |
 | SIH_API_TOKEN | unset | Optional Streamlit bearer token |
+| SIH_SENSOR_REGISTRY_PATH | results/sensors/registry.json | Central sensor registry; keep private and backed up |
+| SIH_SENSOR_ENROLLMENT_TTL_SECONDS | 600 | Lifetime of one-time enrollment credentials |
+| SIH_SENSOR_HEARTBEAT_TIMEOUT_SECONDS | 90 | Age after which a sensor is OFFLINE without heartbeat |
+| SIH_SENSOR_RATE_LIMIT_PER_MINUTE | 60 | Per-sensor heartbeat/telemetry request limit |
 
 When auth is enabled, at least one role token is required. Use a secret
 manager/environment injection in deployment; never commit token values.

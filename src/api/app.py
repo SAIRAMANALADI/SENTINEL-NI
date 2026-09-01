@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import timedelta
+import hashlib
+import json
 import time
 import uuid
 from pathlib import Path
@@ -14,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from src.api.auth import require_role
+from src.api.sensors import require_sensor, require_telemetry_sensor
 from src.api.models import (
     ErrorResponse,
     ForecastRequest,
@@ -26,6 +30,10 @@ from src.api.models import (
     ReadyResponse,
     SourcePriorityRequest,
     SourcePriorityResponse,
+    RemoteTelemetryBatch,
+    SensorEnrollmentRequest,
+    SensorHeartbeatRequest,
+    SensorRegisterRequest,
 )
 from src.api.services import forecast_payload, mitigation_payload, source_priority_payload
 from src.evaluation.operating_policy import load_policy
@@ -38,6 +46,14 @@ from src.platform.metrics import MetricsRegistry
 from src.platform.state import ServiceState
 from src.streaming.final_demo_engine import run_final_demo
 from src.api.live_runtime import LiveRuntimeStore
+from src.sensors.registry import (
+    InvalidEnrollment,
+    SensorNotFound,
+    SensorRateLimitExceeded,
+    SensorRegistry,
+    SensorSequenceConflict,
+)
+from src.sensors.runtime import RemoteSensorRuntimeStore
 from src.telemetry.live import (
     LiveTelemetryError,
     LiveTelemetryPermissionDenied,
@@ -61,6 +77,13 @@ class Runtime:
         self._static_readiness: dict[str, Any] | None = None
         self.live_runtime = LiveRuntimeStore()
         self.telemetry = self._build_telemetry_adapter()
+        self.sensor_registry = SensorRegistry(
+            settings.sensor_registry_path,
+            heartbeat_timeout_seconds=settings.sensor_heartbeat_timeout_seconds,
+            telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
+            rate_limit_per_minute=settings.sensor_rate_limit_per_minute,
+        )
+        self.remote_sensor_runtime = RemoteSensorRuntimeStore()
 
     def _on_live_event(self, event: dict[str, Any]) -> bool:
         return self.live_runtime.ingest_event(event)
@@ -303,6 +326,142 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=_error_payload("CONTRACT_ERROR", str(exc), request),
         )
+
+    def sensor_view(sensor_id: str) -> dict[str, Any]:
+        try:
+            sensor = runtime.sensor_registry.get(sensor_id)
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+        sensor["runtime"] = runtime.remote_sensor_runtime.snapshot(sensor_id)
+        return sensor
+
+    @app.post("/api/v1/sensors/enrollment")
+    async def create_sensor_enrollment(
+        body: SensorEnrollmentRequest,
+        _: str = Depends(require_role("admin")),
+    ) -> dict[str, Any]:
+        return runtime.sensor_registry.create_enrollment(expires_in_seconds=body.expires_in_seconds)
+
+    @app.post("/api/v1/sensors/register")
+    async def register_sensor(body: SensorRegisterRequest) -> dict[str, Any]:
+        try:
+            registered = runtime.sensor_registry.register(
+                enrollment_token=body.enrollment_token,
+                hostname=body.hostname,
+                agent_version=body.agent_version,
+            )
+        except InvalidEnrollment as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "INVALID_ENROLLMENT", "message": "enrollment credential is invalid or expired"},
+            ) from exc
+        return {"schema_version": "1", **registered}
+
+    @app.get("/api/v1/sensors")
+    async def list_sensors(_: str = Depends(require_role("viewer"))) -> dict[str, Any]:
+        sensors = []
+        for sensor in runtime.sensor_registry.list():
+            sensor["runtime"] = runtime.remote_sensor_runtime.snapshot(sensor["sensor_id"])
+            sensors.append(sensor)
+        return {"count": len(sensors), "sensors": sensors}
+
+    @app.get("/api/v1/sensors/{sensor_id}")
+    async def get_sensor(sensor_id: str, _: str = Depends(require_role("viewer"))) -> dict[str, Any]:
+        return sensor_view(sensor_id)
+
+    @app.post("/api/v1/sensors/{sensor_id}/heartbeat")
+    async def sensor_heartbeat(
+        sensor_id: str,
+        body: SensorHeartbeatRequest,
+        sensor: dict[str, Any] = Depends(require_sensor),
+    ) -> dict[str, Any]:
+        try:
+            runtime.sensor_registry.accept_heartbeat(
+                sensor_id,
+                buffered_item_count=body.buffered_item_count,
+                agent_version=body.agent_version,
+            )
+        except SensorRateLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor heartbeat rate limit exceeded"},
+            ) from exc
+        del sensor
+        return sensor_view(sensor_id)
+
+    @app.post("/api/v1/telemetry")
+    async def ingest_remote_telemetry(
+        body: RemoteTelemetryBatch,
+        sensor: dict[str, Any] = Depends(require_telemetry_sensor),
+    ) -> dict[str, Any]:
+        sensor_id = str(sensor["sensor_id"])
+        if body.sensor_id != sensor_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "SENSOR_ID_MISMATCH", "message": "telemetry identity does not match the credential"},
+            )
+        previous = None
+        for state_point in body.states:
+            if state_point.timestamp.date() != state_point.capture_day:
+                raise ValueError("state timestamp must belong to capture_day")
+            if previous is not None:
+                if state_point.capture_day != previous.capture_day:
+                    raise ValueError("one telemetry batch cannot cross capture-day boundaries")
+                if state_point.timestamp - previous.timestamp != timedelta(seconds=10):
+                    raise ValueError("telemetry states must be contiguous 10-second intervals")
+            previous = state_point
+        canonical = body.model_dump(mode="json")
+        batch_hash = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        try:
+            decision = runtime.sensor_registry.check_telemetry(
+                sensor_id, sequence=body.sequence, batch_hash=batch_hash
+            )
+        except SensorSequenceConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "SENSOR_SEQUENCE_CONFLICT", "message": str(exc)},
+            ) from exc
+        if decision == "duplicate":
+            return {
+                "schema_version": "1",
+                "sensor_id": sensor_id,
+                "sequence": body.sequence,
+                "status": "DUPLICATE_ACKNOWLEDGED",
+                "forecast": runtime.remote_sensor_runtime.snapshot(sensor_id),
+            }
+        try:
+            runtime.sensor_registry.check_rate(sensor_id)
+        except SensorRateLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},
+            ) from exc
+        states = [state.model_dump(mode="json") for state in body.states]
+        result = runtime.remote_sensor_runtime.ingest(sensor_id, states)
+        try:
+            runtime.sensor_registry.accept_telemetry(
+                sensor_id,
+                sequence=body.sequence,
+                batch_hash=batch_hash,
+                buffered_item_count=0,
+            )
+        except SensorRateLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},
+            ) from exc
+        return {
+            "schema_version": "1",
+            "sensor_id": sensor_id,
+            "sequence": body.sequence,
+            "status": "ACCEPTED",
+            "forecast": result,
+        }
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     async def health(request: Request) -> HealthResponse:

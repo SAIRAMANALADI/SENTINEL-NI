@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getLive, getReady, runDemo, startTelemetry, stopTelemetry } from "../lib/api";
-import type { DemoResponse, LiveResponse } from "../lib/types";
+import { getLive, getReady, getSensors, runDemo, startTelemetry, stopTelemetry } from "../lib/api";
+import type { DemoResponse, LiveResponse, SensorSummary } from "../lib/types";
 import { ForecastView } from "./ForecastView";
 import { SourceIntelligence } from "./SourceIntelligence";
 import { StatusPill } from "./StatusPill";
@@ -11,10 +11,11 @@ import { ThinkingSystem } from "./ThinkingSystem";
 import { GuidedEntry } from "./GuidedEntry";
 import { LiveJourney } from "./LiveJourney";
 import { TermHelp } from "./TermHelp";
+import { SensorFleet } from "./SensorFleet";
 
-type View = "Overview" | "Live" | "Replay" | "Forecast" | "Sources" | "Recommendations" | "System";
+type View = "Overview" | "Live" | "Replay" | "Forecast" | "Sources" | "Sensors" | "Recommendations" | "System";
 type RuntimeState = "INITIALIZING" | "DEMO" | "REPLAY" | "LIVE" | "BUILDING_HISTORY" | "FORECAST_READY" | "STALE" | "STOPPED" | "CAPTURE_UNAVAILABLE" | "ERROR" | "BACKEND_UNAVAILABLE";
-const nav: View[] = ["Overview", "Live", "Replay", "Forecast", "Sources", "Recommendations", "System"];
+const nav: View[] = ["Overview", "Live", "Replay", "Forecast", "Sources", "Sensors", "Recommendations", "System"];
 
 const number = (value: number | undefined) => typeof value === "number" ? new Intl.NumberFormat("en-US", { notation: value > 9999 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value) : "—";
 const toneFor = (status: string): "live" | "ready" | "warning" | "stale" | "muted" | "error" => status === "FORECAST_READY" || status === "READY" || status === "DEMO" ? "ready" : status === "CAPTURING" || status === "LIVE_RUNNING" || status === "LIVE" ? "live" : status === "STALE" || status === "STALE_NOT_LIVE" ? "stale" : status === "ERROR" || status === "BACKEND_UNAVAILABLE" || status === "CAPTURE_UNAVAILABLE" ? "error" : "muted";
@@ -52,6 +53,7 @@ export default function CommandCenter() {
   const [telemetryBusy, setTelemetryBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [sensors, setSensors] = useState<SensorSummary[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -59,6 +61,7 @@ export default function CommandCenter() {
       if (!health.ready) throw new Error(`Backend is not ready (${health.service_state})`);
       setLive(current);
       setConnectionError(null);
+      try { setSensors((await getSensors()).sensors); } catch { setSensors([]); }
     } catch (reason) {
       setLive(null);
       setDemo(null);
@@ -128,6 +131,7 @@ export default function CommandCenter() {
         {view === "Overview" && <ThinkingSystem />}
         {view === "Recommendations" && <Operations mode={mode} live={live} onDemo={() => void executeDemo()} loading={demoLoading} />}
         {view === "System" && <SystemPanel live={live} loading={loading} state={state} />}
+        {view === "Sensors" && <SensorFleet sensors={sensors} />}
         {view === "Overview" && <footer className="disclaimer-footer">Forecast Score is not a calibrated probability · Candidate sources are not confirmed attribution · Simulation only: TRUE</footer>}
       </>}
     </section>

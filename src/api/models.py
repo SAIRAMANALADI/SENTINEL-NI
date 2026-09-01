@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, IPvAnyAddress, field_validator
 
 
 MAX_SOURCE_PRIORITY_EVENTS = 4096
 MAX_MITIGATION_SOURCES = 1024
+MAX_REMOTE_STATES_PER_BATCH = 60
 
 
 class StatePoint(BaseModel):
@@ -142,3 +143,42 @@ class MetricsResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: dict[str, Any]
+
+
+class SensorEnrollmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expires_in_seconds: int = Field(default=600, ge=60, le=86_400)
+
+
+class SensorRegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enrollment_token: str = Field(min_length=20, max_length=256)
+    hostname: str = Field(min_length=1, max_length=255)
+    agent_version: str = Field(min_length=1, max_length=64)
+
+
+class SensorHeartbeatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    buffered_item_count: int = Field(default=0, ge=0, le=100_000)
+    agent_version: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class RemoteStatePoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
+    capture_day: date
+    features: dict[str, FiniteFloat] = Field(min_length=17, max_length=17)
+
+
+class RemoteTelemetryBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1"]
+    sensor_id: str = Field(min_length=8, max_length=64, pattern=r"^sensor-[a-f0-9]{16}$")
+    sequence: int = Field(ge=1)
+    sent_at: datetime
+    states: list[RemoteStatePoint] = Field(min_length=1, max_length=MAX_REMOTE_STATES_PER_BATCH)

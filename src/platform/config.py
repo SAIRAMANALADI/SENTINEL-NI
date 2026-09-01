@@ -48,6 +48,10 @@ class Settings:
     telemetry_stale_after_seconds: int = 30
     max_request_bytes: int = 2_000_000
     environment: str = "development"
+    sensor_registry_path: Path = PROJECT_ROOT / "results" / "sensors" / "registry.json"
+    sensor_enrollment_ttl_seconds: int = 600
+    sensor_heartbeat_timeout_seconds: int = 90
+    sensor_rate_limit_per_minute: int = 60
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -115,6 +119,12 @@ class Settings:
             telemetry_stale_after_seconds=int(os.getenv("SIH_TELEMETRY_STALE_AFTER_SECONDS", "30")),
             max_request_bytes=max_request_bytes,
             environment=environment,
+            sensor_registry_path=_env_path(
+                "SIH_SENSOR_REGISTRY_PATH", PROJECT_ROOT / "results" / "sensors" / "registry.json"
+            ),
+            sensor_enrollment_ttl_seconds=int(os.getenv("SIH_SENSOR_ENROLLMENT_TTL_SECONDS", "600")),
+            sensor_heartbeat_timeout_seconds=int(os.getenv("SIH_SENSOR_HEARTBEAT_TIMEOUT_SECONDS", "90")),
+            sensor_rate_limit_per_minute=int(os.getenv("SIH_SENSOR_RATE_LIMIT_PER_MINUTE", "60")),
         )
 
     def validate(self) -> None:
@@ -129,6 +139,12 @@ class Settings:
             raise ValueError("telemetry_stale_after_seconds must be positive")
         if self.max_request_bytes <= 0:
             raise ValueError("max_request_bytes must be positive")
+        if self.sensor_enrollment_ttl_seconds < 60:
+            raise ValueError("sensor_enrollment_ttl_seconds must be at least 60")
+        if self.sensor_heartbeat_timeout_seconds <= 0:
+            raise ValueError("sensor_heartbeat_timeout_seconds must be positive")
+        if self.sensor_rate_limit_per_minute <= 0:
+            raise ValueError("sensor_rate_limit_per_minute must be positive")
         if self.environment not in {"development", "test", "production"}:
             raise ValueError("environment must be development, test, or production")
         if self.environment == "production":

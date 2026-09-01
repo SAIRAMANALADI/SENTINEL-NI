@@ -194,6 +194,20 @@ button { font:inherit; }
 .response-row div span { display:block; margin-top:5px; }
 .response-row p { min-height:0; margin:0; }
 .response-row small { text-align:right; }
+.sensor-fleet { max-width:1050px; }
+.sensor-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.sensor-card { padding:22px; background:#111818; border:1px solid var(--line); border-left:2px solid #566662; }
+.sensor-card.sensor-online { border-left-color:var(--green); }
+.sensor-card.sensor-degraded { border-left-color:var(--amber); }
+.sensor-card.sensor-offline { border-left-color:var(--red); }
+.sensor-card-top { display:flex; justify-content:space-between; gap:18px; }
+.sensor-status,.sensor-agent { color:#9aa4a1; font-family:"DM Mono",monospace; font-size:9px; letter-spacing:.07em; }
+.sensor-online .sensor-status { color:var(--green); }.sensor-degraded .sensor-status { color:var(--amber); }.sensor-offline .sensor-status { color:var(--red); }
+.sensor-card h3 { margin:10px 0 5px; color:#f1f0e9; font-size:20px; letter-spacing:-.04em; }
+.sensor-card code { color:#7f8b88; font-family:"DM Mono",monospace; font-size:9px; }
+.sensor-facts { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:24px; padding-top:15px; border-top:1px solid var(--line); }
+.sensor-facts span { display:flex; flex-direction:column; gap:6px; }.sensor-facts small { color:#7f8b88; font-size:9px; }.sensor-facts strong { color:#e8efeb; font-family:"DM Mono",monospace; font-size:11px; font-weight:500; }
+@media (max-width:700px) { .sensor-list { grid-template-columns:1fr; }.sensor-facts { grid-template-columns:repeat(2,1fr); } }
 @media (max-width:1000px) { .signature-hero { min-height:0; }.hero-grid { gap:24px; }.primary-forecast,.context-panel { min-height:0; }.response-row { grid-template-columns:150px minmax(0,1fr); }.response-row small { grid-column:2; text-align:left; } }
 @media (max-width:700px) { .hero-actions button { flex:1; }.hero-grid { gap:0; }.primary-forecast { padding-left:16px; }.context-panel { padding-left:0; }.forecast-item { border-right:1px solid var(--line); }.response-row { grid-template-columns:1fr; gap:8px; }.response-row small { grid-column:auto; }.forecast-axis { margin-top:14px; } }
 @media (max-width:700px) { .navigation nav { max-width:100%; overflow-x:auto; }.nav-item { font-size:11px; white-space:nowrap; }.nav-item::before { display:none; } }

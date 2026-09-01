@@ -1,4 +1,4 @@
-import type { DemoResponse, LiveResponse } from "./types";
+import type { DemoResponse, LiveResponse, SensorSummary } from "./types";
 
 const token = process.env.NEXT_PUBLIC_SIH_API_TOKEN;
 
@@ -37,4 +37,8 @@ export function startTelemetry(): Promise<Record<string, unknown>> {
 
 export function stopTelemetry(): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>("/api/v1/telemetry/stop", { method: "POST" });
+}
+
+export function getSensors(): Promise<{ count: number; sensors: SensorSummary[] }> {
+  return request<{ count: number; sensors: SensorSummary[] }>("/api/v1/sensors");
 }

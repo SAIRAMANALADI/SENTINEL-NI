@@ -123,3 +123,29 @@ export interface DemoResponse {
   simulation_only: boolean;
   pcap_attribution_validated: boolean;
 }
+
+export interface SensorRuntime {
+  sensor_id: string;
+  history_length?: number;
+  history_required?: number;
+  state_count?: number;
+  forecast_update_count?: number;
+  forecast_status?: string;
+  latest_state_timestamp?: string | null;
+  source_status?: string;
+}
+
+export interface SensorSummary {
+  sensor_id: string;
+  hostname: string;
+  agent_version: string;
+  status: "ONLINE" | "DEGRADED" | "OFFLINE";
+  last_seen?: string | null;
+  last_heartbeat?: string | null;
+  last_telemetry_at?: string | null;
+  telemetry_freshness_seconds?: number | null;
+  heartbeat_freshness_seconds?: number | null;
+  buffered_item_count?: number;
+  last_sequence?: number;
+  runtime?: SensorRuntime;
+}

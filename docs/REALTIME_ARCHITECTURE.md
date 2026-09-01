@@ -22,6 +22,17 @@ Raw live packet metadata does not contain the flow fields required by the
 frozen 17-feature network-state aggregator. Therefore live source activity is
 not presented as live model inference until an approved packet-to-state
 contract exists.
+
+Remote server interface + Sentinel sensor agent
+  -> completed flows -> exact 10-second, 17-feature state batches
+  -> authenticated /api/v1/telemetry
+  -> per-sensor StateBuffer (L=10)
+  -> existing predict_network_state_sequence()
+  -> sensor-scoped forecast view
+
+Remote telemetry is state-only. The central service does not capture remote
+packets directly, and source prioritization remains unavailable for a remote
+sensor unless source identity is included in a separately approved contract.
 ```
 
 ## Components
@@ -36,6 +47,9 @@ contract exists.
 | Inference trigger | `src/streaming/realtime_engine.py` | Runs only after exactly 10 valid same-day states are buffered; then runs once for every new valid state. |
 | Result stream | `EngineUpdate` | Carries buffering/waiting status or the existing inference result plus state index and processing time. |
 | Streamlit consumer | `app/streamlit_app.py` | Offers Demo Replay and Static Sample modes. |
+| Remote sensor agent | `src/agent/` | Host-local Scapy capture, FlowBuilder conversion, bounded state batches, retry/buffer/heartbeat. |
+| Sensor registry | `src/sensors/registry.py` | One-time enrollment, hashed runtime credentials, sequence dedupe, freshness, and rate limits. |
+| Remote runtime | `src/sensors/runtime.py` | Isolated per-sensor L=10 history and existing inference function. |
 
 ## Frozen-contract guarantees
 
