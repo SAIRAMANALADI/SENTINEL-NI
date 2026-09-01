@@ -1,286 +1,253 @@
-<div align="center">
-
 # SENTINEL / NI
 
-### Predict the next network state. Give operators time to respond.
+## Network intelligence for the next 50 seconds
 
-**An open-source real-time network security platform for short-horizon
-attack-state forecasting, source prioritization, and defensive decision
-support.**
+Sentinel / NI is an open-source network-security platform for short-horizon
+network-state forecasting. It converts measured network activity into fixed
+10-second states, applies a frozen LSTM model, and presents a focused operator
+workflow: Forecast Score, Predictive Warning, Candidate Sources, and
+Mitigation Recommendations.
 
-<sub>SIH26-26153 · v0.1.0 · 10-second network states · recommendation-only operations</sub>
+It is built for decision support. It does not claim confirmed intrusion
+detection, automatic blocking, or calibrated risk probabilities.
 
-</div>
-
-<br />
-
-> Network signals become state. State becomes context. Context becomes a
-> decision surface—before the operator has to react.
-
-Sentinel / NI converts network-flow telemetry into structured network states,
-uses a frozen temporal model to forecast the next 50 seconds, and turns that
-forecast into a focused operating view: **Forecast Score**, **Predictive
-Warning / No Predictive Warning**, **Source Priority**, **Mitigation
-Recommendation**, and model-sensitivity context.
-
-## At a glance
-
-| Contract | Current release |
+| Release contract | Current implementation |
 | --- | --- |
-| Release | `v0.1.0` |
-| Network state interval | 10 seconds |
-| Model context | `L=10` states |
-| Forecast horizon | `K=5` · +10s / +20s / +30s / +40s / +50s |
-| Model input | 17 numeric flow-derived features |
-| Primary threshold | `0.19` |
-| Input | CSE-CIC-IDS2018 multi-day flow data |
-| Operations | Replay Mode and opt-in Live Mode |
-| Mitigation | Recommendation-only · no automatic blocking |
+| State interval | 10 seconds |
+| Model context | 10 states (L=10) |
+| Forecast | Five direct horizons (K=5): +10s to +50s |
+| Model inputs | 17 numeric flow-derived features |
+| Primary threshold | 0.19 |
+| Response model | Recommendation-only; simulation-only mitigation |
+| Modes | Replay, Mock, Local Live, Remote Sensor |
 
-## The product loop
+## Operating model
 
-```text
-  NETWORK
-     │
-  PACKETS ──► FLOWS ──► NETWORK STATES
-                              │
-                         L=10 HISTORY
-                              │
-                          LSTM K=5
-                              │
-                           FORECAST
-                    ┌─────────┼─────────┐
-                    ▼         ▼         ▼
-             SOURCE PRIORITY MITIGATION  API
-                                          │
-                                      DASHBOARD
-```
+Sentinel operates out of band. It is not a reverse proxy, does not sit between
+customers and an application, and must not delay customer requests.
 
-The backend owns the processing session and inference path. The browser is a
-consumer of structured results—it does not start a packet sniffer or run a
-second model pipeline.
+    Customer
+       |
+       v
+    Company Application Server  ------------------------------> Response
+       |
+       | observed in parallel
+       v
+    Sentinel Sensor / Agent
+       |
+       | authenticated, aggregated telemetry
+       v
+    Central Sentinel
+       |
+       +--> 10-second state runtime
+       +--> frozen LSTM K=5
+       +--> operating policy
+       +--> source intelligence where telemetry supports it
+       +--> mitigation recommendations
+       v
+    Dashboard
 
-## What operators see
+The remote agent processes traffic on its own host, builds the approved state
+schema locally, and sends bounded state batches to the central API. It never
+forwards raw packet payloads. The browser communicates only with Central
+Sentinel, never directly with remote agents.
 
-### Forecast
+## What Sentinel provides
 
-Five direct forecast points show the near-term network outlook at +10, +20,
-+30, +40, and +50 seconds. The +10s result is the primary operating horizon.
-Every result is presented as a **Forecast Score**—a model output, not a
+| Capability | Behaviour |
+| --- | --- |
+| Forecast | Five future Forecast Scores for +10/+20/+30/+40/+50 seconds |
+| Warning | Predictive Warning when the +10s score meets the configured threshold |
+| Candidate Sources | Evidence-based ranking from source-capable local telemetry; not attacker attribution |
+| Mitigation | Human-reviewed recommendations only; no firewall changes or automatic blocking |
+| Replay | Deterministic local demonstration and regression mode |
+| Local Live | Host-level metadata capture with Scapy and Npcap/libpcap prerequisites |
+| Remote Sensor | Per-server enrollment, heartbeat, telemetry validation, isolated histories, and sensor-scoped forecasts |
+
+## Quick start
+
+### Run the central platform
+
+#### Docker Compose
+
+Use Docker Compose for the central API and dashboard only. It does not claim
+arbitrary host packet capture from inside a container.
+
+    docker compose up -d --build
+
+Open the primary dashboard at [http://localhost:3000](http://localhost:3000).
+The central API listens on port 8000; the Streamlit fallback listens on 8501.
+
+    docker compose down
+
+#### Local Python
+
+    py -3.14 -m venv .venv
+    & .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+    & .\.venv\Scripts\python.exe scripts\check_environment.py
+    & .\.venv\Scripts\python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+
+For local frontend development, start a second terminal:
+
+    Set-Location frontend
+    npm ci
+    npm run dev
+
+### Run a deterministic replay
+
+    python scripts/run_replay_demo.py --max-states 20 --speed 0
+
+Replay uses approved local sample data. It does not download datasets or read
+live traffic.
+
+### Connect a remote server
+
+Run Central Sentinel behind HTTPS, a firewall or private network, and
+environment-injected credentials. Do not expose the internal application port
+directly to the public internet.
+
+An administrator creates a one-time enrollment credential from the dashboard
+Connected servers view or with the API. On the remote server:
+
+    python -m src.agent init --server-url https://sentinel.example --interface "Ethernet"
+    python -m src.agent register --enrollment-token <one-time-enrollment-token>
+    python -m src.agent start
+    python -m src.agent status
+
+The central dashboard reports registration, heartbeat freshness, telemetry
+freshness, buffer depth, history readiness, and the sensor-scoped forecast. It
+does not report a sensor as online merely because it was registered.
+
+Read the [sensor installation guide](docs/SENSOR_INSTALLATION.md), the
+[distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md), and the
+[sensor security guide](docs/SENSOR_SECURITY.md) before deployment.
+
+## Forecasting contract
+
+The frozen target is:
+
+    future_attack_state(t)
+      = binary_attack_state(t + 10 seconds)
+        within the same capture_day
+
+The model receives exactly 17 features in the order defined by
+[the feature schema](configs/state_feature_schema.yaml). It uses ten
+chronological states and returns five direct forecast points. The threshold is
+an operating-policy decision boundary, not a statement that a score is a
 calibrated probability.
 
-### Operating warning
+Training and evaluation use the fixed CSE-CIC-IDS2018 day-aware split:
 
-The configured policy maps the primary score to **Predictive Warning** or **No
-Predictive Warning**. This is decision support, not confirmation of an event.
+| Role | Capture days |
+| --- | --- |
+| Train | 2018-02-14, 2018-02-21 |
+| Validation | 2018-02-22 |
+| Final test | 2018-02-28 |
 
-### Source prioritization
+The V1 state artifact contains 16,127 states. Dataset files, processed data,
+model checkpoints, and PCAP archives are intentionally not committed.
 
-Observed activity is grouped into ranked **Candidate Sources**. A **Source
-Priority** identifies what deserves review first; it does not prove identity or
-replace analyst investigation.
+## Remote sensor architecture
 
-### Mitigation
+Each sensor has its own identity, telemetry sequence ledger, state buffer,
+forecast context, health record, and local disk buffer. Sensor histories are
+never combined.
 
-Mitigation is deliberately separate from source ranking. The current release
-provides a **Mitigation Recommendation** only. It does not change firewall
-rules, block traffic, or execute operator commands. Demonstration responses
-keep **Simulation Only: TRUE** visible.
+    sensor-A -> [A1, A2, A3, ...] -> forecast-A
+    sensor-B -> [B1, B2, B3, ...] -> forecast-B
 
-## Local and distributed operation
+Remote telemetry is schema version 1 and contains a sensor ID, monotonic
+sequence number, send timestamp, and up to 60 contiguous ten-second states.
+The central API verifies identity, schema, feature count, finite values,
+capture-day consistency, ordering, duplicate delivery, payload size, and rate
+limits before the existing state and inference path is invoked.
 
-| Mode | Purpose | Data boundary |
-| --- | --- | --- |
-| **Replay Mode** | Deterministic demos, CI, and repeatable evaluation | Local approved sample/replay events |
-| **Live Mode** | Host-level network observation | Metadata visible on one explicitly configured interface |
-| **Remote Sensor** | Out-of-band collection from another server | Agent-generated 10-second state telemetry over the central API |
-
-Replay is the safest way to evaluate the product. Live Mode is opt-in,
-host-dependent, and requires Npcap on Windows or libpcap plus the necessary
-permissions on Linux. It needs ten valid chronological 10-second states before
-the first forecast is available.
-
-Remote Sensor mode keeps the customer's request path independent:
-
-```text
-Customer request -> Company Application Server -> response
-                          |
-                          +-- in parallel: Sentinel Agent -> telemetry
-                                                   -> Central Sentinel
-                                                   -> Forecast / Intelligence
-```
-
-Sentinel is out-of-band, not a reverse proxy. The remote agent observes its
-own host interface, builds the existing 17-feature states, and sends bounded
-telemetry batches to the central service. The browser talks only to the
-central API; it does not connect directly to remote agents. Start with
-[the sensor installation guide](docs/SENSOR_INSTALLATION.md) and
-[the distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md).
-
-## Start in minutes
-
-### Option A — Docker Compose
-
-```bash
-docker compose up -d --build
-```
-
-Open the primary interface at [http://localhost:3000](http://localhost:3000).
-The backend is available on port `8000`; the Streamlit fallback is on `8501`.
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-### Option B — local Python
-
-```powershell
-py -3.14 -m venv .venv
-& .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
-& .\.venv\Scripts\python.exe scripts\check_environment.py
-& .\.venv\Scripts\python.exe -m pytest -q
-```
-
-Start the backend and fallback dashboard in separate terminals:
-
-```powershell
-& .\.venv\Scripts\python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
-& .\.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py
-```
-
-The full clean-install workflow is documented in
-[docs/REPRODUCIBLE_INSTALLATION.md](docs/REPRODUCIBLE_INSTALLATION.md).
-
-### Run the deterministic replay
-
-```powershell
-python scripts/run_replay_demo.py --max-states 20 --speed 0
-```
-
-The command builds the bounded history and prints the five forecast horizons.
-It does not download data or inspect live traffic. More copy-paste examples
-are in [examples/README.md](examples/README.md).
+The agent persists failed delivery batches in a bounded, sequence-ordered disk
+buffer and retries transient failures with backoff. A full buffer is explicit;
+the agent does not pretend unsent telemetry was delivered.
 
 ## API surface
 
-The FastAPI service exposes versioned endpoints for:
+| Area | Endpoints |
+| --- | --- |
+| Service | GET /api/v1/health, GET /api/v1/ready |
+| Local runtime | GET /api/v1/live, GET /api/v1/telemetry |
+| Forecasting | POST /api/v1/forecast, POST /api/v1/demo |
+| Source and mitigation | POST /api/v1/source-priority, POST /api/v1/mitigation |
+| Sensor onboarding | POST /api/v1/sensors/enrollment, POST /api/v1/sensors/register |
+| Sensor operations | GET /api/v1/sensors, GET /api/v1/sensors/{sensor_id}, POST /api/v1/sensors/{sensor_id}/heartbeat |
+| Remote telemetry | POST /api/v1/telemetry |
 
-- health and readiness: `/api/v1/health`, `/api/v1/ready`;
-- live state and telemetry controls: `/api/v1/live`, `/api/v1/telemetry/*`;
-- forecasting: `/api/v1/forecast`;
-- source review and mitigation recommendations;
-- deterministic demonstration output: `POST /api/v1/demo`.
-- remote sensor onboarding and health: `POST /api/v1/sensors/enrollment`,
-  `POST /api/v1/sensors/register`, `GET /api/v1/sensors`;
-- authenticated state telemetry: `POST /api/v1/telemetry`.
+Interactive API documentation is available at /docs in development and is
+disabled in production.
 
-Interactive API documentation is available at `/docs` in development and is
-disabled in production. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and
-[docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) before exposing the
-service.
+## Security boundaries
 
-## Frozen v0.1 contract
+- Production configuration fails closed unless authentication is enabled and
+  role credentials are supplied.
+- Remote onboarding uses expiring, one-time enrollment credentials. Runtime
+  credentials are dedicated per sensor and stored hashed centrally.
+- Request validation, payload limits, per-sensor rate limits, sequence checks,
+  duplicate protection, bounded buffers, and security headers are implemented.
+- Packet payload content is not retained or forwarded by the live or remote
+  telemetry path.
+- Remote state-only telemetry cannot responsibly produce candidate-source
+  attribution; the dashboard states that limitation explicitly.
 
-The approved target is:
+Recommended topology: a private network or firewall boundary, a TLS reverse
+proxy, and an authenticated Central Sentinel API. mTLS, OIDC, tenant
+isolation, and high availability are future hardening work.
 
-```text
-future_attack_state(t)
-  = binary_attack_state(t + 10 seconds)
-    within the same capture_day
-```
+## Verification
 
-Terminal states without a future +10s target are excluded. The day-aware split
-is fixed: **2018-02-14 and 2018-02-21 for training**, **2018-02-22 for
-validation**, and **2018-02-28 for final test**.
+The current repository verification record includes:
 
-The frozen dataset contains **16,127 network states** and **17 flow-derived
-features**. The exact feature order and target rules live in the versioned
-contracts:
+    python -m pytest -q       224 passed
+    npm run typecheck         passed
+    npm run build             passed
+    docker compose config     passed
 
-- [Data contract](docs/DATA_CONTRACT.md)
-- [Network-state specification](docs/NETWORK_STATE_SPEC.md)
-- [Target-state specification](docs/TARGET_STATE_SPEC.md)
-- [Inference contract](docs/INFERENCE_CONTRACT.md)
-- [Feature schema](configs/state_feature_schema.yaml)
-
-## Data and security boundaries
-
-Raw datasets, processed datasets, PCAP archives, model checkpoints, generated
-caches, and local audit output are excluded from Git. They must be acquired or
-generated locally under their own access and licensing rules.
-
-PCAP enrichment is intentionally not fused into v0.1: the available archive
-does not currently have defensible machine or five-tuple provenance connecting
-it to the frozen flow artifact. Packet-level features are not fabricated.
-
-Live capture follows a metadata-only principle: packet payload bytes are not
-retained by the live adapter. Production configuration fails closed unless
-authentication is enabled and all required role tokens are supplied. Read the
-[security policy](SECURITY.md), [technical security boundaries](docs/SECURITY.md),
-and [privacy notes](docs/PRIVACY.md) before using real traffic.
-
-## Validate the repository
-
-The v0.1 release was verified with:
-
-```bash
-python -m pytest -q
-docker compose config
-docker compose build
-docker compose up -d
-```
-
-The final recorded result is **215 pytest tests passed**, with Docker health,
-readiness, restart/recovery, frontend build, deterministic replay, and live
-capture checks documented in the release reports.
-
-- [Final release check](results/FINAL_V0_1_RELEASE_CHECK.md)
-- [v0.1 freeze report](results/FINAL_V0_1_FREEZE_REPORT.md)
-- [Public repository audit](results/PUBLIC_REPOSITORY_AUDIT.md)
-- [Current limitations](docs/LIMITATIONS.md)
+Remote-sensor coverage includes enrollment, authentication, telemetry
+validation, duplicate and rate-limit handling, bounded buffering, a real
+LSTM-path telemetry test, and multi-sensor runtime isolation. See the
+[implementation report](docs/DISTRIBUTED_SENSOR_IMPLEMENTATION_REPORT.md) for
+the exact evidence and remaining deployment work.
 
 ## Repository map
 
-```text
-app/        Streamlit fallback and deterministic demo interface
-configs/    Versioned feature, model, and runtime configuration
-data/       Local raw, processed, and sample-data locations
-docs/       Contracts, architecture, operations, and security guidance
-examples/   Safe copy-paste usage examples
-frontend/   Primary Next.js / React / TypeScript interface
-models/     Local model artifacts; checkpoints are Git-ignored
-scripts/    Reproducibility, validation, and maintenance commands
-src/        Ingestion, features, forecasting, inference, and telemetry
-tests/      Automated regression and contract tests
-```
+    app/         Streamlit fallback and demonstration interface
+    configs/     Versioned model, state, and operating-policy contracts
+    docs/        Architecture, security, deployment, and operating guides
+    frontend/    Next.js and React dashboard
+    models/      Local checkpoint artifacts (Git ignored)
+    scripts/     Reproducibility and validation commands
+    src/agent/   Remote Sentinel Sensor CLI and delivery runtime
+    src/api/     Central FastAPI service and contracts
+    src/sensors/ Sensor registry and isolated remote runtimes
+    tests/       Automated regression, API, runtime, and security tests
 
 ## Documentation
 
-| Start here | Go deeper |
-| --- | --- |
-| [Architecture](docs/ARCHITECTURE.md) | [Real-time product architecture](docs/REALTIME_PRODUCT_ARCHITECTURE.md) |
-| [Deployment guide](docs/DEPLOYMENT_GUIDE.md) | [Live operation](docs/LIVE_OPERATION.md) |
-| [Model contract](docs/MODEL.md) | [Forecasting](docs/FORECASTING.md) |
-| [Telemetry](docs/TELEMETRY.md) | [Troubleshooting](docs/TROUBLESHOOTING.md) |
-| [Source prioritization](docs/SOURCE_PRIORITIZATION.md) | [Mitigation](docs/MITIGATION.md) |
-| [Privacy](docs/PRIVACY.md) | [Security](SECURITY.md) |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Distributed Sensor Architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md)
+- [Remote Telemetry Contract](docs/REMOTE_TELEMETRY.md)
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Sensor Operations](docs/SENSOR_OPERATIONS.md)
+- [Security Boundaries](docs/SECURITY.md)
+- [Current Limitations](docs/LIMITATIONS.md)
+- [Contributing](CONTRIBUTING.md)
 
-## Roadmap
+## Limitations and roadmap
 
-The next release can add longer live-soak evidence, stronger queue and
-flow-table observability, drift monitoring, broader telemetry adapters, and an
-authoritative PCAP-to-flow attribution path. Enterprise identity, high
-availability, and automatic enforcement require separate security and
-deployment work.
+Sentinel is currently a single-node, process-local platform. Its capture path
+depends on host access, supported interfaces, and Scapy/Npcap/libpcap. It has
+not made production-capacity, long-duration soak, penetration-test, HA, or
+automatic-response claims. PCAP fusion remains excluded from the frozen V1
+flow artifact because authoritative matching provenance is unavailable.
 
-## Contributing
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Keep
-the frozen data/model contracts explicit, run the relevant validation gates,
-and never submit datasets, PCAPs, checkpoints, credentials, private traffic,
-or personal filesystem paths.
+The next engineering steps are a real multi-host sensor soak, TLS reverse
+proxy deployment validation, service-manager packaging for the agent,
+certificate-based identity, and broader source-capable telemetry adapters.
 
 ## License
 
@@ -288,8 +255,8 @@ Project-owned code is released under the [MIT License](LICENSE). Dataset, PCAP,
 and model-artifact terms are separate; contributors must have the right to
 share anything they submit.
 
+---
+
 <div align="center">
-
-<sub>Sentinel / NI · Forecast first. Respond deliberately.</sub>
-
+  <sub>Sentinel / NI · Forecast first. Respond deliberately.</sub>
 </div>
