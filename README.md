@@ -87,17 +87,35 @@ provides a **Mitigation Recommendation** only. It does not change firewall
 rules, block traffic, or execute operator commands. Demonstration responses
 keep **Simulation Only: TRUE** visible.
 
-## Replay Mode and Live Mode
+## Local and distributed operation
 
 | Mode | Purpose | Data boundary |
 | --- | --- | --- |
 | **Replay Mode** | Deterministic demos, CI, and repeatable evaluation | Local approved sample/replay events |
 | **Live Mode** | Host-level network observation | Metadata visible on one explicitly configured interface |
+| **Remote Sensor** | Out-of-band collection from another server | Agent-generated 10-second state telemetry over the central API |
 
 Replay is the safest way to evaluate the product. Live Mode is opt-in,
 host-dependent, and requires Npcap on Windows or libpcap plus the necessary
 permissions on Linux. It needs ten valid chronological 10-second states before
 the first forecast is available.
+
+Remote Sensor mode keeps the customer's request path independent:
+
+```text
+Customer request -> Company Application Server -> response
+                          |
+                          +-- in parallel: Sentinel Agent -> telemetry
+                                                   -> Central Sentinel
+                                                   -> Forecast / Intelligence
+```
+
+Sentinel is out-of-band, not a reverse proxy. The remote agent observes its
+own host interface, builds the existing 17-feature states, and sends bounded
+telemetry batches to the central service. The browser talks only to the
+central API; it does not connect directly to remote agents. Start with
+[the sensor installation guide](docs/SENSOR_INSTALLATION.md) and
+[the distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md).
 
 ## Start in minutes
 
@@ -154,6 +172,9 @@ The FastAPI service exposes versioned endpoints for:
 - forecasting: `/api/v1/forecast`;
 - source review and mitigation recommendations;
 - deterministic demonstration output: `POST /api/v1/demo`.
+- remote sensor onboarding and health: `POST /api/v1/sensors/enrollment`,
+  `POST /api/v1/sensors/register`, `GET /api/v1/sensors`;
+- authenticated state telemetry: `POST /api/v1/telemetry`.
 
 Interactive API documentation is available at `/docs` in development and is
 disabled in production. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and

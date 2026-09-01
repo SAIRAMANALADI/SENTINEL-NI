@@ -23,7 +23,7 @@ export function SignatureHero({ forecast, mode, onReplay, onLive, loading }: Pro
       <div className="network-process" role="img" aria-label="Traffic becomes flows, network states, and a forecast">
         <div className="process-step"><span>Traffic</span><small>network activity</small></div><b>→</b><div className="process-step"><span>Flows</span><small>grouped activity</small></div><b>→</b><div className="process-step"><span>Network states</span><small>10-second intervals</small></div><b>→</b><div className="process-step process-output"><span>Forecast</span><small>future behavior</small></div>
       </div>
-      <p className="signal-empty">{active ? "Prepared demonstration traffic is ready to review." : "Start a demo or live monitoring to see network activity here."}</p>
+      <p className="signal-empty">{active ? mode === "REMOTE SENSOR" ? "Telemetry from the selected remote server is ready to review." : "Prepared demonstration traffic is ready to review." : "Start a demo, select a connected server, or start live monitoring to see network activity here."}</p>
       {forecast?.horizons?.[0] && <div className="signature-readout"><span>Forecast Score · +10s</span><strong>{forecast.horizons[0].score.toFixed(4)}</strong><em>{forecast.horizons[0].warning ? "Predictive warning" : "No predictive warning"}</em></div>}
     </div>
   </section>;

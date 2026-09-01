@@ -133,6 +133,12 @@ export interface SensorRuntime {
   forecast_status?: string;
   latest_state_timestamp?: string | null;
   source_status?: string;
+  forecast?: {
+    forecast?: ForecastRow[];
+    threshold?: number;
+    reference_timestamp?: string;
+    explanation?: Explanation;
+  } | null;
 }
 
 export interface SensorSummary {

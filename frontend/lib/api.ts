@@ -42,3 +42,11 @@ export function stopTelemetry(): Promise<Record<string, unknown>> {
 export function getSensors(): Promise<{ count: number; sensors: SensorSummary[] }> {
   return request<{ count: number; sensors: SensorSummary[] }>("/api/v1/sensors");
 }
+
+export function createEnrollment(expiresInSeconds = 600): Promise<{ enrollment_token: string; expires_at: string; expires_in_seconds: number }> {
+  return request<{ enrollment_token: string; expires_at: string; expires_in_seconds: number }>("/api/v1/sensors/enrollment", {
+    method: "POST",
+    body: JSON.stringify({ expires_in_seconds: expiresInSeconds }),
+    headers: { "Content-Type": "application/json" },
+  });
+}

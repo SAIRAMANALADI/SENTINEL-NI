@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -102,3 +102,33 @@ def test_remote_telemetry_rate_limit_is_checked_before_runtime(tmp_path: Path) -
     second = {**body, "sequence": 2}
     response = client.post("/api/v1/telemetry", json=second, headers=headers)
     assert response.status_code == 429
+
+
+def test_remote_telemetry_reaches_the_real_lstm_after_ten_states(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    states = [(lambda timestamp: _state(timestamp.isoformat()))(datetime(2018, 2, 22, 1, 0, tzinfo=timezone.utc) + timedelta(seconds=index * 10)) for index in range(10)]
+    body = {"schema_version": "1", "sensor_id": sensor_id, "sequence": 1,
+            "sent_at": datetime.now(timezone.utc).isoformat(), "states": states}
+    response = client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token})
+    assert response.status_code == 200
+    assert response.json()["forecast"]["forecast_available"] is True
+    assert response.json()["forecast"]["forecast_updates"] == 1
+
+
+def test_two_remote_sensors_keep_forecast_histories_isolated(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_a, token_a = _register(client)
+    sensor_b, token_b = _register(client)
+    states = [(lambda timestamp: _state(timestamp.isoformat()))(datetime(2018, 2, 22, 2, 0, tzinfo=timezone.utc) + timedelta(seconds=index * 10)) for index in range(10)]
+    for sensor_id, token in ((sensor_a, token_a), (sensor_b, token_b)):
+        payload = {"schema_version": "1", "sensor_id": sensor_id, "sequence": 1,
+                   "sent_at": datetime.now(timezone.utc).isoformat(), "states": states if sensor_id == sensor_a else states[:1]}
+        response = client.post("/api/v1/telemetry", json=payload, headers={"X-Sentinel-Sensor-Token": token})
+        assert response.status_code == 200
+    details_a = client.get(f"/api/v1/sensors/{sensor_a}", headers={"Authorization": "Bearer viewer-test"}).json()
+    details_b = client.get(f"/api/v1/sensors/{sensor_b}", headers={"Authorization": "Bearer viewer-test"}).json()
+    assert details_a["runtime"]["state_count"] == 10
+    assert details_a["runtime"]["forecast_status"] == "FORECAST_READY"
+    assert details_b["runtime"]["state_count"] == 1
+    assert details_b["runtime"]["forecast_status"] == "BUILDING_HISTORY"
