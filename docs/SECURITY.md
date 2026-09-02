@@ -41,10 +41,12 @@ issue trackers.
 
 ## Release hygiene
 
-Do not commit credentials, bearer tokens, private traffic, PCAPs, raw or
-processed datasets, model checkpoints, generated caches, or local path data.
-Use environment injection for deployment secrets. Review logs and audit output
-for sensitive data before sharing them.
+Do not commit credentials, bearer tokens, private traffic, PCAPs, full raw or
+processed datasets, generated caches, or local path data. The repository's
+small approved offline demo/test fixtures and frozen release checkpoints are
+the exception required for clean-checkout validation; do not add additional
+runtime artifacts without review. Use environment injection for deployment
+secrets. Review logs and audit output for sensitive data before sharing them.
 
 ## Future work
 

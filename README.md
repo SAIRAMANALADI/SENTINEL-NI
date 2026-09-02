@@ -145,8 +145,11 @@ Training and evaluation use the fixed CSE-CIC-IDS2018 day-aware split:
 | Validation | 2018-02-22 |
 | Final test | 2018-02-28 |
 
-The V1 state artifact contains 16,127 states. Dataset files, processed data,
-model checkpoints, and PCAP archives are intentionally not committed.
+The V1 state artifact contains 16,127 states. Full raw/processed datasets and
+PCAP archives are intentionally not committed. The repository includes only
+the small approved offline demo/test fixtures and frozen checkpoints required
+to run the release checks; production datasets remain local acquisition
+artifacts.
 
 ## Remote sensor architecture
 

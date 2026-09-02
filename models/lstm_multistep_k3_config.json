@@ -1,0 +1,76 @@
+{
+  "batch_size": 128,
+  "capture_interval_seconds": 10,
+  "checkpoint_selection": "mean validation PR-AUC across forecast steps",
+  "checkpoint_selection_metric": "mean validation PR-AUC across forecast steps",
+  "development_model": true,
+  "device": "cpu",
+  "dropout": 0.0,
+  "epochs": 20,
+  "feature_columns": [
+    "flow_count",
+    "byte_sum",
+    "packet_sum",
+    "mean_duration",
+    "median_duration",
+    "mean_iat",
+    "iat_std",
+    "syn_flow_ratio",
+    "ack_flow_ratio",
+    "rst_flow_ratio",
+    "fwd_byte_share",
+    "fwd_packet_share",
+    "unique_destination_port_count",
+    "bytes_per_second",
+    "packets_per_second",
+    "packet_size_mean",
+    "packet_size_std"
+  ],
+  "feature_schema_version": "network-state-v1.0",
+  "forecast_horizon": 3,
+  "forecast_horizon_seconds": 30,
+  "forecast_horizon_steps": 3,
+  "hidden_size": 64,
+  "input_feature_count": 17,
+  "input_size": 17,
+  "learning_rate": 0.001,
+  "loss": "BCEWithLogitsLoss",
+  "model_version": "LSTM-DEVELOPMENT-V1-direct-multistep-K3",
+  "num_layers": 1,
+  "output_size": 3,
+  "positive_class_weights": [
+    4.315527065527066,
+    4.311743772241993,
+    4.311743772241993
+  ],
+  "positive_weights": [
+    4.315527065527066,
+    4.311743772241993,
+    4.311743772241993
+  ],
+  "random_seed": 42,
+  "seed": 42,
+  "selected_thresholds": [
+    0.3,
+    0.7,
+    0.7
+  ],
+  "sequence_length": 10,
+  "state_interval_seconds": 10,
+  "target_column": "future_attack_state",
+  "target_definition": "For step j in 1..K, target[j] is binary_attack_state(t + j * 10 seconds) within the same capture_day; K=1 equals future_attack_state(t).",
+  "target_source_column": "binary_attack_state",
+  "target_version": "docs/TARGET_STATE_SPEC.md",
+  "test_split": [
+    "2018-02-28"
+  ],
+  "threshold_selection": "per-step validation F1",
+  "threshold_selection_split": "validation",
+  "train_split": [
+    "2018-02-14",
+    "2018-02-21"
+  ],
+  "validation_split": [
+    "2018-02-22"
+  ]
+}

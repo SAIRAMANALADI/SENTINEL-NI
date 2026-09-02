@@ -76,3 +76,23 @@ frontend/tsconfig.tsbuildinfo
 
 # Local architecture-analysis output; never ship generated graph artifacts.
 graphify-out/
+
+# Small, non-sensitive offline CI/demo fixtures. Full raw/processed datasets,
+# PCAP archives, and other generated artifacts remain ignored above.
+!data/samples/final_demo_events.csv
+!data/samples/inference_demo_sequence.csv
+!data/samples/source_attribution_mock.jsonl
+!data/processed/cic_ids2018_network_states.parquet
+!data/processed/states/
+!data/processed/states/test.parquet
+!models/lstm_multistep_k1_config.json
+!models/lstm_multistep_k1.pt
+!models/lstm_multistep_k3_config.json
+!models/lstm_multistep_k3.pt
+!models/lstm_multistep_k5_config.json
+!models/lstm_multistep_k5.pt
+!models/logistic_baseline.joblib
+!models/baseline_preprocessor.joblib
+!results/data_pipeline_report.md
+!notebooks/
+!notebooks/.gitkeep
