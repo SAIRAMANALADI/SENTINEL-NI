@@ -13,9 +13,12 @@
 
 ## [Unreleased]
 
-- Added explicit production fail-closed configuration guardrails.
-- Exposed live runtime session identity in current-state and forecast output.
-- Added session provenance to audit records.
-- Added dynamic telemetry-aware readiness evaluation.
-- Added baseline response security headers and public live-operation docs.
-- Documented open-source release limitations and deferred production gates.
+- Added public operator quickstart, environment support matrix, development
+  guide, release manifest, and release notes.
+- Added a deterministic release audit for tracked-file hygiene, documentation
+  links, obvious secret patterns, local paths, and frozen-path changes.
+- Extended CI coverage to the frontend typecheck/build, package build, and the
+  public release audit.
+- Added package metadata and direct private security-advisory instructions.
+- Documented that Docker runtime, staging TLS, physical multi-host deployment,
+  and sustained live soak remain environment-dependent validation gates.

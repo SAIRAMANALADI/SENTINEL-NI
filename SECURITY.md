@@ -1,11 +1,22 @@
 # Security Policy
 
+## Supported versions
+
+The current supported public line is `0.1.x`. Security fixes are evaluated
+against the current `main` branch and the latest tagged release. Older,
+unmaintained snapshots should be upgraded before reporting a deployment issue.
+
 ## Reporting
 
-Do not publish credentials, private traffic, PCAP contents, or an exploitable
-vulnerability in a public issue. Contact the repository maintainers through a
-private GitHub security advisory or the private channel configured by the
-project owner.
+Report vulnerabilities through a private GitHub security advisory for
+[SAIRAMANALADI/SENTINEL-NI](https://github.com/SAIRAMANALADI/SENTINEL-NI/security/advisories/new).
+Include the affected version or commit, deployment mode, reproduction steps,
+impact, and any logs with secrets removed. Do not publish credentials, private
+traffic, PCAP contents, or an exploitable vulnerability in a public issue.
+
+We ask reporters to allow reasonable time for triage and coordinated
+disclosure. This project does not promise a fixed response or remediation
+time.
 
 ## Deployment boundary
 

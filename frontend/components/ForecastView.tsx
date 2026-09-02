@@ -62,7 +62,7 @@ export function ForecastView({ rows, threshold, explanation, status }: { rows: F
           <p className="micro-copy">Why five horizons? Sentinel shows several future points so operators can see how the forecast changes over time. Forecast Score is a raw model output, not a calibrated probability.</p>
         </>
       ) : (
-        <div className="empty-state"><span className="empty-mark">—</span><div><strong>{status === "STOPPED" ? "Waiting for network data" : status === "ERROR" ? "Forecast unavailable" : "Building forecast history"}</strong><p>{status === "STOPPED" ? "Run the demo or start live monitoring to produce a forecast." : status === "ERROR" ? "The backend did not provide a usable forecast." : "Forecast activates after 10 recent network states are available."}</p></div></div>
+        <div className="empty-state"><span className="empty-mark">—</span><div><strong>{status === "STOPPED" ? "Waiting for telemetry." : status === "ERROR" ? "Forecast unavailable" : "Forecast not ready yet."}</strong><p>{status === "STOPPED" ? "Start a replay, connect a sensor, or start live monitoring." : status === "ERROR" ? "The backend did not provide a usable forecast. Check Central Sentinel health and readiness." : "Forecast will become available after sufficient valid network-state history."}</p></div></div>
       )}
       {explanation && <Explainability explanation={explanation} />}
     </section>

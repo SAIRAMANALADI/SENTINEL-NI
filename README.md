@@ -83,6 +83,12 @@ before configuring an external collector.
 
 ## Quick start
 
+For the shortest operator path, start with [Operator Quickstart](docs/OPERATOR_QUICKSTART.md).
+For supported platforms and evidence boundaries, see
+[Environment Support](docs/ENVIRONMENT_SUPPORT.md). This repository is an
+open-source release candidate, not a claim of production capacity or universal
+platform support.
+
 ### Run the central platform
 
 #### Docker Compose
@@ -151,6 +157,9 @@ Read the [agent installation guide](docs/AGENT_INSTALLATION.md), the
 [agent operations guide](docs/AGENT_OPERATIONS.md), the
 [distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md), and the
 [sensor security guide](docs/SENSOR_SECURITY.md) before deployment.
+
+The public release contract is recorded in [Release Manifest](docs/RELEASE_MANIFEST.md),
+and contributor setup is in [Development Guide](docs/DEVELOPMENT.md).
 
 ## Forecasting contract
 
@@ -271,6 +280,10 @@ for the exact evidence and remaining deployment work.
 - [Telemetry Source Security](docs/TELEMETRY_SOURCE_SECURITY.md)
 - [Remote Telemetry Contract](docs/REMOTE_TELEMETRY_CONTRACT.md)
 - [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Real Deployment Runbook](docs/REAL_DEPLOYMENT_RUNBOOK.md)
+- [Deployment Test Matrix](docs/DEPLOYMENT_TEST_MATRIX.md)
+- [Staging Validation Report](docs/STAGING_VALIDATION_REPORT.md)
+- [Failure Recovery Matrix](docs/FAILURE_RECOVERY_MATRIX.md)
 - [Agent Installation](docs/AGENT_INSTALLATION.md)
 - [Agent Operations](docs/AGENT_OPERATIONS.md)
 - [Agent Upgrades](docs/AGENT_UPGRADES.md)
@@ -278,8 +291,13 @@ for the exact evidence and remaining deployment work.
 - [Agent Security](docs/AGENT_SECURITY.md)
 - [Sensor Operations](docs/SENSOR_OPERATIONS.md)
 - [Security Boundaries](docs/SECURITY.md)
+- [Security Architecture](docs/SECURITY_ARCHITECTURE.md)
+- [Threat Model](docs/THREAT_MODEL.md)
+- [Credential Lifecycle](docs/CREDENTIAL_LIFECYCLE.md)
+- [TLS Deployment](docs/TLS_DEPLOYMENT.md)
 - [Current Limitations](docs/LIMITATIONS.md)
 - [Contributing](CONTRIBUTING.md)
+- [Release Notes](docs/RELEASE_NOTES.md)
 
 ## Limitations and roadmap
 

@@ -92,6 +92,23 @@ remote L=10 runtime history remains process-local and must rebuild after a
 central restart. Docker Compose does not grant host packet-capture capability;
 the agent must run on the monitored host.
 
+## Phase I validation boundary
+
+The repository's deployment validation is currently **development-only**:
+
+- **Tested:** local Python/package installation, automated agent-to-central
+  delivery, sensor isolation, buffering/retry contracts, security checks,
+  frontend typecheck/build, and `docker compose config`.
+- **Supported but not tested in this workspace:** a real reverse-proxy HTTPS
+  deployment, two physical remote hosts, Docker container startup/restart,
+  live packet-capture soak, and a five-sensor/30-minute run.
+- **Planned:** staging certificate/DNS validation, physical multi-host soak,
+  measured outage recovery, and production-capacity assessment.
+
+Do not claim Docker runtime or staging TLS support from Compose configuration
+alone. Run the checks in [DEPLOYMENT_TEST_MATRIX.md](DEPLOYMENT_TEST_MATRIX.md)
+and record evidence in [PHASE_I_DEPLOYMENT_VALIDATION_REPORT.md](PHASE_I_DEPLOYMENT_VALIDATION_REPORT.md).
+
 ### Multi-sensor runtime limits
 
 Central fleet summaries are available at `GET /api/v1/sensors`; full detail and
