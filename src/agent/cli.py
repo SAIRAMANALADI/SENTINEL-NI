@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--server-url", required=True)
     init.add_argument("--interface", required=True)
     init.add_argument("--buffer-dir")
+    init.add_argument("--environment", choices=("development", "production"), default="development")
 
     register = commands.add_parser("register", help="consume a one-time enrollment credential")
     register.add_argument("--enrollment-token", required=True)
@@ -45,7 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     path = _config_path(args)
     if args.command == "init":
-        config = AgentConfig(server_url=args.server_url, interface=args.interface)
+        config = AgentConfig(server_url=args.server_url, interface=args.interface, environment=args.environment)
         if args.buffer_dir:
             config.buffer_dir = Path(args.buffer_dir).expanduser()
         print(config.save(path))

@@ -15,6 +15,16 @@ through Sentinel.
 - no raw packet payload forwarding or credential logging;
 - per-sensor state, forecast, and health isolation.
 
+Enrollment is a server-side control-plane operation. The Next dashboard does
+not call the admin-only enrollment endpoint and must not be configured with a
+global administrator token. The one-time enrollment credential is the only
+secret intended to be handed to the remote operator; it is consumed during
+registration and is not returned by sensor GET endpoints.
+
+The agent configuration has an explicit environment. Development may use
+HTTP for a local central service. Production rejects an HTTP server URL and
+requires HTTPS; the agent does not silently upgrade or downgrade the URL.
+
 ## Required deployment topology
 
 ```text

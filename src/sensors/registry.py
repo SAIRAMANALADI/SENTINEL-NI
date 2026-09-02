@@ -38,6 +38,9 @@ class SensorRateLimitExceeded(SensorRegistryError):
     """A sensor exceeded its bounded request rate."""
 
 
+REGISTRY_SCHEMA_VERSION = 1
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -84,21 +87,49 @@ class SensorRegistry:
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"enrollments": {}, "sensors": {}}
+            return {"schema_version": REGISTRY_SCHEMA_VERSION, "enrollments": {}, "sensors": {}}
         try:
-            loaded = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = self.path.read_text(encoding="utf-8")
+            if not raw.strip():
+                raise ValueError("sensor registry is empty")
+            loaded = json.loads(raw)
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"sensor registry cannot be read: {self.path}") from exc
+        except ValueError as exc:
+            raise ValueError(f"sensor registry cannot be read: {self.path}: {exc}") from exc
         if not isinstance(loaded, dict):
             raise ValueError("sensor registry must be a JSON object")
+        version = loaded.get("schema_version", REGISTRY_SCHEMA_VERSION)
+        if version != REGISTRY_SCHEMA_VERSION:
+            raise ValueError(f"unsupported sensor registry schema version: {version}")
         loaded.setdefault("enrollments", {})
         loaded.setdefault("sensors", {})
         if not isinstance(loaded["enrollments"], dict) or not isinstance(loaded["sensors"], dict):
             raise ValueError("sensor registry collections must be objects")
+        for sensor_id, sensor in loaded["sensors"].items():
+            if not isinstance(sensor, dict):
+                raise ValueError(f"sensor registry record is invalid: {sensor_id}")
+            if sensor.get("sensor_id") != sensor_id:
+                raise ValueError(f"sensor registry record identity is invalid: {sensor_id}")
+            token_hash = sensor.get("runtime_token_hash")
+            if (
+                not isinstance(token_hash, str)
+                or len(token_hash) != 64
+                or any(character not in "0123456789abcdef" for character in token_hash)
+            ):
+                raise ValueError(f"sensor registry credential metadata is invalid: {sensor_id}")
+            if not isinstance(sensor.get("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"}), dict):
+                raise ValueError(f"sensor registry credential metadata is invalid: {sensor_id}")
+            sensor.setdefault("registered_at", sensor.get("created_at"))
+            sensor.setdefault("last_telemetry", sensor.get("last_telemetry_at"))
+            sensor.setdefault("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"})
+            sensor.setdefault("registration_state", "REGISTERED")
+        loaded["schema_version"] = REGISTRY_SCHEMA_VERSION
         return loaded
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._data["schema_version"] = REGISTRY_SCHEMA_VERSION
         payload = json.dumps(self._data, indent=2, sort_keys=True) + "\n"
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=self.path.parent, prefix=".registry-", delete=False
@@ -134,12 +165,16 @@ class SensorRegistry:
                 "hostname": hostname,
                 "agent_version": agent_version,
                 "created_at": _iso(now),
+                "registered_at": _iso(now),
+                "registration_state": "REGISTERED",
                 "last_seen": None,
                 "last_heartbeat": None,
+                "last_telemetry": None,
                 "last_telemetry_at": None,
                 "last_sequence": 0,
                 "last_batch_hash": None,
                 "buffered_item_count": 0,
+                "credential_metadata": {"type": "sensor-runtime-token", "stored": "sha256"},
                 "runtime_token_hash": _hash_secret(runtime_token),
             }
             self._save()
@@ -204,6 +239,7 @@ class SensorRegistry:
             sensor["last_sequence"] = sequence
             sensor["last_batch_hash"] = batch_hash
             sensor["buffered_item_count"] = buffered_item_count
+            sensor["last_telemetry"] = _iso(now)
             sensor["last_telemetry_at"] = _iso(now)
             sensor["last_seen"] = _iso(now)
             self._save()
@@ -240,7 +276,9 @@ class SensorRegistry:
         last_seen = _parse(sensor.get("last_seen"))
         heartbeat_age = (now - heartbeat).total_seconds() if heartbeat else None
         telemetry_age = (now - telemetry).total_seconds() if telemetry else None
-        if last_seen is None or (now - last_seen).total_seconds() > self.heartbeat_timeout_seconds:
+        if last_seen is None:
+            status = "REGISTERED"
+        elif (now - last_seen).total_seconds() > self.heartbeat_timeout_seconds:
             status = "OFFLINE"
         elif heartbeat_age is not None and heartbeat_age <= self.heartbeat_timeout_seconds and telemetry_age is not None and telemetry_age <= self.telemetry_stale_after_seconds:
             status = "ONLINE"
@@ -251,13 +289,17 @@ class SensorRegistry:
             "hostname": sensor["hostname"],
             "agent_version": sensor["agent_version"],
             "created_at": sensor["created_at"],
+            "registered_at": sensor.get("registered_at", sensor["created_at"]),
+            "registration_state": sensor.get("registration_state", "REGISTERED"),
             "last_seen": sensor.get("last_seen"),
             "last_heartbeat": sensor.get("last_heartbeat"),
+            "last_telemetry": sensor.get("last_telemetry", sensor.get("last_telemetry_at")),
             "last_telemetry_at": sensor.get("last_telemetry_at"),
             "telemetry_freshness_seconds": telemetry_age,
             "heartbeat_freshness_seconds": heartbeat_age,
             "buffered_item_count": int(sensor.get("buffered_item_count", 0)),
             "last_sequence": int(sensor.get("last_sequence", 0)),
+            "credential_metadata": dict(sensor.get("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"})),
             "status": status,
         }
 

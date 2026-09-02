@@ -1,58 +1,258 @@
-# Distributed Sensor Architecture
+# Distributed Sensor Architecture — Phase A–C Contract
 
-Sentinel supports remote-server collection without changing the frozen
-forecasting contract. A sensor runs beside the monitored interface, converts
-packet metadata into completed bidirectional flows, aggregates the flows into
-the existing 10-second state schema, and sends only state telemetry to the
-central API.
+**Phase:** A architecture audit plus the implemented Phase B/C control-plane
+and telemetry path
+**Scope of this document:** the implemented repository as inspected on
+2026-09-02. The frozen model, feature schema, local capture semantics, replay,
+and frontend forecast behavior remain unchanged.
+
+## 1. Architecture decision
+
+Sentinel is an **out-of-band observability and forecasting system**. A customer's ordinary application requests do not transit Sentinel, are not proxied through Sentinel, and must not be delayed by Sentinel.
 
 ```text
-remote server: interface -> Scapy/Npcap -> LiveTelemetryAdapter
-  -> FlowBuilder -> aggregate_flow_window (17 features)
-  -> bounded batch + disk buffer == authenticated HTTPS ==>
-central server: sensor registry -> validation -> isolated sensor runtime
-  -> StateBuffer (L=10) -> existing LSTM K=5 -> dashboard
+Customer traffic
+client --------------------------------------------> customer application server
+
+Sentinel telemetry path
+remote server interface -> Sentinel Agent -> authenticated HTTPS state telemetry
+                                              -> central Sentinel API
+                                              -> isolated per-sensor runtime
+                                              -> existing LSTM K=5
+                                              -> operator dashboard
 ```
 
-## Identity and enrollment
+The repository already contains the first distributed-sensor implementation. The purpose of later phases is to harden and operationally validate that implementation, not to create a second competing telemetry path.
 
-An administrator creates a short-lived, one-time enrollment credential. The
-agent exchanges it for a persistent `sensor_id` and a dedicated runtime token.
-The three values are distinct: enrollment is bootstrap authority, sensor ID
-is routing identity, and the runtime token is sent only in
-`X-Sentinel-Sensor-Token`. The registry stores only a SHA-256 runtime-token
-hash. Secrets are returned once and redacted from agent output.
+## 2. Current architecture
 
-## Telemetry contract
+### 2.1 Local capture path
 
-Schema version `1` contains `sensor_id`, monotonic batch `sequence`, UTC
-`sent_at`, and one to sixty states. Each state contains the exact frozen 17
-feature names, `timestamp`, and `capture_day`. States must be finite,
-date-consistent, and contiguous at ten-second intervals inside one batch.
-Target columns and raw packet payloads are not accepted.
+The current local live path is owned by one `LiveRuntimeStore` and is separate from remote sensor runtimes:
 
-Identical accepted sequence/hash pairs are acknowledged without re-running
-inference. Conflicting or out-of-order sequences are rejected. Each sensor
-gets its own runtime and history; it cannot overwrite local history or another
-sensor's history.
+```text
+Scapy/Npcap/libpcap packet metadata
+  -> src.telemetry.live.LiveTelemetryAdapter
+  -> src.api.app.Runtime._on_live_event
+  -> src.api.live_runtime.LiveRuntimeStore.ingest_event
+       -> FlowBuilder (completed bidirectional flows)
+       -> SourceActivityAccumulator (source activity only)
+       -> build_network_state_for_inference (10-second states)
+       -> StateBuffer (L=10, one capture day, no gaps)
+       -> predict_network_state_sequence (frozen LSTM, K=5)
+       -> source prioritization + recommendation-only mitigation
+  -> GET /api/v1/live
+  -> frontend CommandCenter / ForecastView / SourceIntelligence
+```
 
-## Reliability and health
+`LiveTelemetryAdapter` emits metadata only: timestamp, addresses, ports, protocol, length, TCP flags, and a small set of header-derived fields. It never retains packet objects or payload bytes. `FlowBuilder` creates bounded bidirectional flows and only emits a flow on FIN, RST, timeout, or explicit flush.
 
-The agent batches states and stores failed batches in an atomic,
-sequence-ordered disk queue. Queue count and bytes are capped. A full queue
-raises an explicit error rather than discarding telemetry. Heartbeats carry
-buffer count and agent version. Central status is `ONLINE` when heartbeat and
-telemetry are fresh, `DEGRADED` when one is stale, and `OFFLINE` when last
-seen exceeds the heartbeat timeout.
+The local source path is deliberately distinct from the model path. `SourceActivityAccumulator` produces measured source activity; `src.streaming.source_forecast` ranks those candidate sources beside the network forecast; `src.evaluation.mitigation_policy` returns recommendations only and never blocks traffic.
 
-## Security and limitations
+### 2.2 Replay and mock paths
 
-Use HTTPS behind a private reverse proxy, firewall/private-network rules, and
-environment-injected role tokens. Current controls include strict schema and
-size/rate validation, credential separation, secret redaction, no raw payload
-logging, and per-sensor runtime isolation. mTLS, OIDC, tenant isolation, HA
-registry, and external durable queues are future hardening work.
+`src.telemetry.mock.MockTelemetryAdapter` and `src.telemetry.replay.ReplayTelemetryAdapter` remain local API modes selected by `SIH_TELEMETRY_MODE`. They feed the established runtime/replay contracts and must remain independent of remote sensor state. The demo endpoint is deterministic prepared data, not a remote-sensor substitute.
 
-Local `MOCK`, `REPLAY`, and host-level `LIVE` modes remain unchanged. Remote
-telemetry is an additional sensor path. The dashboard explicitly labels a
-connected server as a sensor and never implies central capture of its packets.
+### 2.3 Implemented remote sensor path
+
+```text
+remote monitored host
+  interface
+  -> LiveTelemetryAdapter (metadata only)
+  -> src.agent.collector.AgentCollector
+  -> FlowBuilder
+  -> aggregate_flow_window
+  -> exact 10-second state: 17 features + timestamp + capture_day
+  -> SensorAgent batching / bounded disk buffer
+  -> POST /api/v1/telemetry over HTTPS
+
+central Sentinel
+  -> request-size, Pydantic, identity, date, cadence, sequence, duplicate, and rate checks
+  -> RemoteSensorRuntimeStore[sensor_id]
+  -> RemoteSensorRuntime[sensor_id]
+  -> StateBuffer (L=10, isolated per sensor)
+  -> existing predict_network_state_sequence()
+  -> GET /api/v1/sensors and GET /api/v1/sensors/{sensor_id}
+  -> frontend SensorFleet selection and reused forecast presentation
+```
+
+The remote agent therefore connects **after state construction**, not to the customer's application traffic path and not to the central `LiveRuntimeStore`. Central ingestion enters at `POST /api/v1/telemetry`, then calls `RemoteSensorRuntimeStore.ingest(sensor_id, states)`.
+
+## 3. Frozen forecasting contract
+
+Both local and remote state paths must preserve the existing contract:
+
+- exact 17 ordered numeric features from `configs/state_feature_schema.yaml` (`network-state-v1.0`);
+- state cadence exactly 10 seconds;
+- exactly 10 contiguous, same-day states per LSTM input;
+- existing checkpoint and preprocessing artifacts;
+- existing direct multi-output LSTM K=5 forecast semantics: +10, +20, +30, +40, and +50 seconds;
+- approved balanced operating threshold `0.19` and the display term **Forecast Score**;
+- existing future-target definition in `docs/TARGET_STATE_SPEC.md`; target columns are not remote telemetry inputs.
+
+`sensor_id` is routing and ownership metadata. It must not be added to the 17 feature columns, sent to the model, used as a model feature, or used to alter the operating threshold.
+
+## 4. Sensor identity, registration, and authentication boundaries
+
+### Identity
+
+`src.sensors.registry.SensorRegistry` creates a persistent central identity shaped as `sensor-<16 hexadecimal characters>`. It stores hostname, agent version, freshness/sequence metadata, and only a SHA-256 hash of the sensor runtime credential.
+
+### Registration flow
+
+```text
+administrator bearer token
+  -> POST /api/v1/sensors/enrollment
+  -> expiring, one-time enrollment credential
+
+remote agent
+  -> POST /api/v1/sensors/register
+  -> sensor_id + one-time-returned runtime token
+  -> src.agent.config.AgentConfig local configuration
+```
+
+Enrollment authority, `sensor_id`, and the sensor runtime token are deliberately different values. The agent uses the runtime token only in `X-Sentinel-Sensor-Token`; administrator, operator, and viewer actions use the existing bearer-token role mechanism in `src.api.auth`.
+
+### Authentication boundary
+
+- `src.api.auth.require_role()` controls viewer/operator/admin access to central operator endpoints.
+- `src.api.sensors.require_sensor()` and `require_telemetry_sensor()` authenticate sensor runtime credentials independently of user roles.
+- The telemetry body `sensor_id` must match the identity authenticated by the header. A sensor cannot choose another sensor's runtime by changing the body.
+- The agent transport uses the standard TLS-validating Python URL client when configured with `https://`; it currently also permits `http://` in configuration for local development.
+
+## 5. Telemetry, buffering, and heartbeat boundary
+
+### Telemetry contract
+
+`RemoteTelemetryBatch` version `1` accepts one to sixty states. Every state contains only:
+
+- timestamp;
+- capture day;
+- a map of exactly the 17 finite model features.
+
+The API rejects extra fields, non-finite values, invalid dates, cross-day batches, non-contiguous ten-second intervals, sensor-ID mismatches, oversized requests, out-of-order sequences, and conflicting duplicate sequences. An identical accepted `sequence` plus payload hash receives a duplicate acknowledgement and does not run inference again.
+
+### Buffering flow
+
+`src.agent.buffer.DiskTelemetryBuffer` writes an unsent batch atomically as a sequence-named JSON file. It delivers batches in sequence order, caps both file count and bytes, and raises an explicit `BufferFullError` instead of silently dropping telemetry. `SensorAgent` retries transient HTTP/network failures with bounded exponential backoff. It does not claim a rejected or full-buffer batch was delivered.
+
+### Heartbeat flow
+
+The agent sends an independent heartbeat containing buffered-batch count and agent version to `POST /api/v1/sensors/{sensor_id}/heartbeat`. Registry health is:
+
+- `ONLINE`: heartbeat and telemetry are fresh;
+- `DEGRADED`: the sensor was recently seen but one freshness condition is stale;
+- `OFFLINE`: `last_seen` exceeds the heartbeat timeout.
+
+## 6. Multi-sensor isolation
+
+Isolation is already implemented at the following boundaries:
+
+| Boundary | Implementation | Required invariant |
+| --- | --- | --- |
+| Credential | per-sensor runtime-token hash in `SensorRegistry` | one sensor cannot authenticate as another |
+| Delivery ordering | `last_sequence` and batch hash per sensor | one sensor cannot replay/overwrite another's batch history |
+| Runtime state | `RemoteSensorRuntimeStore` dictionary keyed by `sensor_id` | each sensor has its own `StateBuffer`, history, forecast, counters, and errors |
+| Temporal history | `StateBuffer` per runtime | no cross-sensor or cross-day L=10 sequence |
+| UI selection | `selectedSensorId` in `frontend/components/CommandCenter.tsx` | displayed remote forecast is scoped to the selected sensor |
+| Local runtime | `LiveRuntimeStore` is not stored in the remote runtime map | remote telemetry cannot overwrite local capture/replay state |
+
+Remote state-only telemetry intentionally has no source IP, flow identity, packet events, or raw packet payload. Consequently `RemoteSensorRuntime.snapshot()` returns an empty source-priority list and `UNAVAILABLE_FROM_AGGREGATED_STATE_TELEMETRY`. Remote mitigation is not fabricated; the local candidate-source and recommendation path remains available only when source-capable local events are present.
+
+## 7. Local versus remote operation
+
+| Mode | Packet capture location | Central input | Forecast state owner | Source attribution |
+| --- | --- | --- | --- | --- |
+| `mock` | none | prepared mock contract | local runtime | demo/local contract only |
+| `replay` | none | approved replay event/state source | local runtime | replay-supported data only |
+| local `live` | the central host's selected interface | packet metadata | `LiveRuntimeStore` | measured local source activity; candidate ranking only |
+| remote sensor | remote server's selected interface | aggregated 10-second state batches | `RemoteSensorRuntime[sensor_id]` | unavailable from the approved state-only contract |
+
+No mode may send customer application requests through Sentinel. The remote agent observes its local interface and sends telemetry outward; it is not a reverse proxy, traffic broker, inline blocker, or network gateway.
+
+## 8. Frontend implications and reusable components
+
+The Next frontend already has the primitives needed for later operational hardening:
+
+| Requirement | Existing component/module | Current behavior |
+| --- | --- | --- |
+| Sensors / Add or Connect Server | `frontend/components/SensorFleet.tsx` | presents the administrator-controlled connection workflow and agent commands; it does not call the enrollment endpoint |
+| Sensor Health | `SensorFleet.tsx` | displays ONLINE/DEGRADED/OFFLINE, freshness, buffered batches, states, and history |
+| Sensor Detail | `SensorFleet.tsx` selected card | displays selected scope, forecast readiness, sequence, and state-only source limitation |
+| Sensor Selection | `CommandCenter.tsx` + `SensorFleet.tsx` | `selectedSensorId` scopes the forecast context rendered below |
+| Forecast display | `ForecastView.tsx` | can reuse the existing K=5 score/timeline/explanation presentation |
+| Candidate sources and mitigation | `SourceIntelligence.tsx` | reuse only when the selected data source actually has source-capable evidence |
+
+The dashboard must continue to state that a remote server is agent-side capture and that state-only telemetry cannot identify candidate sources. It must not present empty remote source lists as evidence of benign traffic.
+
+## 9. Docker and host-capture boundary
+
+`docker-compose.yml` intentionally runs the backend in `SIH_TELEMETRY_MODE=mock`, drops all Linux capabilities, and does not grant host networking, `privileged`, device mappings, or capture capabilities. Docker Compose therefore supports the central API/dashboard path, **not arbitrary host packet capture inside the backend container**.
+
+`docs/LIVE_CAPTURE_IMPLEMENTATION.md` confirms that Scapy/Npcap/libpcap capture is host-level only. A remote agent must run directly on the monitored server with the required capture provider, exact interface, and least capture permission. Do not weaken the central Compose security profile just to capture packets.
+
+## 10. Architectural conflicts and operational risks
+
+These are evidence-backed current limitations, not work performed in Phase A:
+
+1. **Remote runtimes are process-local and in memory.** `RemoteSensorRuntimeStore` and its L=10 histories/forecasts are not durable. A central restart requires every sensor to rebuild a ten-state history; multi-worker/horizontally scaled API processes cannot safely share this in-memory runtime.
+2. **The current registry is single-process only.** Its `RLock` protects one process, not multiple API processes sharing the JSON file. It is not an HA or multi-instance registry. Compose now provides a named volume for registry persistence, but that does not provide distributed locking or HA.
+3. **The agent configuration permits plaintext HTTP only in development.** Production validation fails closed unless the server URL is `https://`. Development HTTP is intentionally local-only and must not be used for deployment.
+4. **Telemetry delivery is bounded at-least-once, not exactly-once.** Sequence/hash deduplication prevents duplicate inference for accepted retransmissions, but a process or network failure around acknowledgement can still require retransmission and operator-visible recovery.
+5. **The browser is not the enrollment authority.** Phase B removes the dashboard call to the admin-only enrollment endpoint. An administrator must create the one-time credential through the server-side control-plane path, then provide only that one-time credential to the remote operator. The broader dashboard bearer-token configuration still needs a proper user/session boundary before internet-facing deployment.
+6. **Remote source attribution is intentionally unavailable.** The approved remote state contract excludes source identity. Adding source attribution requires a separately reviewed privacy, identity, and schema contract; it must not be inferred from aggregate features.
+7. **The agent is not service-manager packaged and lacks a real multi-host soak.** Its CLI and bounded buffer are implemented, but service supervision, TLS reverse-proxy validation, certificate lifecycle, and multi-host Scapy/Npcap operational evidence remain open.
+8. **Capture documentation needs reconciliation.** Some older live-capture text says raw packet metadata is not yet connected to model inference, while the current `LiveRuntimeStore` and remote `AgentCollector` code both implement packet-to-flow-to-state conversion. Future documentation maintenance should make one authoritative statement without changing the frozen contract.
+
+## 11. Exact implementation surface for later phases
+
+### Existing files that may be changed in later hardening phases
+
+| Later concern | Files/modules to change | Why |
+| --- | --- | --- |
+| durable central registry and restart behavior | `docker-compose.yml`, `src/platform/config.py`, `src/sensors/registry.py`, `src/sensors/runtime.py`, deployment docs | preserve registration state safely and define restart/history behavior |
+| secure control-plane authentication | `src/api/auth.py`, `src/api/sensors.py`, `src/api/app.py`, `src/api/models.py`, `frontend/lib/api.ts`, `frontend/components/SensorFleet.tsx` | avoid browser-exposed role tokens and resolve agent status authorization |
+| TLS/mTLS and credential lifecycle | `src/agent/transport.py`, `src/agent/config.py`, `src/agent/client.py`, `src/sensors/registry.py`, `docs/SENSOR_SECURITY.md` | enforce production transport and certificate/rotation policy |
+| agent service and operational controls | `src/agent/cli.py`, `src/agent/client.py`, `src/agent/config.py`, `src/agent/buffer.py`, `docs/SENSOR_INSTALLATION.md`, `docs/SENSOR_OPERATIONS.md` | supervisor packaging, recovery, buffer observability, and safe status behavior |
+| sensor telemetry observability | `src/platform/metrics.py`, `src/platform/audit.py`, `src/api/app.py`, `src/sensors/runtime.py`, frontend sensor components | add sensor-scoped metrics/audit without exposing raw telemetry |
+| remote-source capability, only after a new approved contract | new privacy/schema/design documentation plus `src/api/models.py`, agent collector/contract modules, source modules, frontend | do not reuse aggregate state data to invent source attribution |
+
+### Files/modules that must remain untouched by distributed-sensor phases
+
+- `models/lstm_multistep_k5.pt` and `models/baseline_preprocessor.joblib`;
+- `src/models/lstm_world_model.py` and the model architecture/checkpoint contract;
+- `src/forecasting/inference.py` except for non-semantic integration validation; no model, score, horizon, or threshold change;
+- `configs/state_feature_schema.yaml` and its 17 feature definitions;
+- `docs/TARGET_STATE_SPEC.md`, the target definition, and approved label semantics;
+- `configs/operating_policy.yaml`, including the balanced `0.19` threshold;
+- `src/features/` aggregation semantics unless a separately approved data-contract version is created;
+- local `mock`, `replay`, and existing local capture behavior in `src/telemetry/`, `src/api/live_runtime.py`, and their regression contracts;
+- `src/streaming/source_activity.py`, `src/streaming/source_forecast.py`, and `src/evaluation/mitigation_policy.py` semantics: no automatic blocking and no unsupported remote attribution.
+
+## 12. Regression-sensitive tests
+
+Later phases must preserve and extend—not weaken—the following evidence:
+
+| Behavior | Existing tests |
+| --- | --- |
+| remote enrollment, token checks, cadence, deduplication, rate limits, real inference, and two-sensor separation | `tests/api/test_remote_sensors.py` |
+| agent disk-buffer ordering, token redaction, and no raw-packet retention claim | `tests/test_sensor_agent.py` |
+| local L=10 buffering, rolling forecasts, stale state, out-of-order handling, and inference concurrency | `tests/test_live_runtime_store.py` |
+| local session restart isolation for history, source priorities, and mitigation | `tests/test_live_restart_isolation.py` |
+| metadata-only packet conversion, capture backend status, bounded queue, and failures | `tests/test_live_telemetry.py`, `tests/test_live_telemetry_contract.py`, `tests/test_live_telemetry_failures.py` |
+| bidirectional flow accounting, closure, timeout, ordering, and bounds | `tests/test_flow_builder.py` |
+| exact state schema, interval, finite-value, day-boundary, and L=10 rules | `tests/test_network_state.py`, `tests/test_state_buffer.py`, `tests/test_live_inference_state.py` |
+| frozen inference/schema/policy/target behavior | `tests/test_inference.py`, `tests/test_input_validation.py`, `tests/test_policy_integration.py`, `tests/test_k1_consistency.py` |
+| local API/dashboard contract and source/mitigation safety | `tests/api/test_api_contracts.py`, `tests/test_live_api.py`, `tests/test_live_dashboard_contract.py`, `tests/test_source_prioritization.py`, `tests/test_mitigation_policy.py` |
+
+## 13. Recommended implementation order after Phase A
+
+1. **Phase B — control-plane hardening:** choose a durable registry strategy, secure the dashboard administrative enrollment flow, and resolve the authenticated agent-status mismatch. Add focused regression tests first.
+2. **Phase C — central ingestion resilience:** make runtime/registry restart behavior explicit, add sensor-scoped audit/metrics, and define safe multi-process limitations or a supported shared-state design.
+3. **Phase D — agent operational hardening:** enforce production HTTPS, define certificate/credential rotation, package supervision guidance, and test retry/restart behavior without changing telemetry semantics.
+4. **Phase E — deployment validation:** validate TLS reverse proxy, registry persistence across Compose recreation, and a real two-host capture/telemetry soak using supported interfaces.
+5. **Phase F — optional remote source enrichment research:** begin only after a separate approved source-identity/privacy contract. It must not alter the frozen 17-feature LSTM input or fabricate candidate sources.
+
+## 14. Phase A conclusion
+
+The correct remote integration point already exists: host-local agent aggregation followed by authenticated state ingestion into an isolated `RemoteSensorRuntimeStore`. The system supports sensor registration, heartbeat, buffering, per-sensor sequences, and forecast isolation while preserving local, replay, and mock behavior. Production readiness is blocked only by the operational/control-plane limitations listed above; no data-pipeline or ML redesign is required for Phase A.

@@ -53,7 +53,7 @@ central service to capture the remote interface.
 
 3. On the connected server, install the package and initialize the agent:
 
-    `python -m src.agent init --server-url https://central-host --interface "Ethernet"`
+    `python -m src.agent init --server-url https://central-host --interface "Ethernet" --environment production`
     `python -m src.agent register --enrollment-token <one-time-token>`
     `python -m src.agent start`
 
@@ -64,3 +64,10 @@ logs. The agent converts packets into completed flows and the existing
 stores unsent batches in a bounded disk buffer. It never forwards raw payloads.
 Use `python -m src.agent stop` for a best-effort local stop; use a service
 manager for production process supervision.
+
+The agent observes traffic in parallel with the customer's application. It is
+not a reverse proxy and customer requests do not wait for telemetry delivery.
+Run `python -m src.agent status` to read the agent's local buffer and the
+authenticated sensor-scoped central status. Run the central API behind a TLS
+reverse proxy/private network; do not expose port 8000 directly to the public
+internet.

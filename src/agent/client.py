@@ -14,8 +14,13 @@ from src.agent.buffer import BufferFullError, DiskTelemetryBuffer
 from src.agent.collector import AgentCollector
 from src.agent.config import AgentConfig
 from src.agent.identity import hostname
+from src.agent.telemetry import TelemetryBatcher
 from src.agent.transport import TransportError, request_json
 from src.telemetry.live import LiveTelemetryAdapter
+from src.platform.logging import get_logger, log_event
+
+
+LOGGER = get_logger(__name__)
 
 
 class SensorClient:
@@ -26,38 +31,64 @@ class SensorClient:
         return f"{self.config.server_url.rstrip('/')}{path}"
 
     def register(self, enrollment_token: str) -> dict[str, Any]:
-        return request_json(
+        result = request_json(
             self.config.server_url,
             "/api/v1/sensors/register",
             method="POST",
             payload={"enrollment_token": enrollment_token, "hostname": hostname(), "agent_version": self.config.agent_version},
         )
+        log_event(LOGGER, "sensor registration succeeded", event_type="registration_succeeded")
+        return result
 
     def heartbeat(self, buffered_item_count: int) -> dict[str, Any]:
         self.config.validate(require_identity=True)
-        return request_json(
+        result = request_json(
             self.config.server_url,
             f"/api/v1/sensors/{self.config.sensor_id}/heartbeat",
             method="POST",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
             payload={"buffered_item_count": buffered_item_count, "agent_version": self.config.agent_version},
         )
+        log_event(
+            LOGGER,
+            "sensor heartbeat sent",
+            event_type="heartbeat_succeeded",
+            sensor_id=self.config.sensor_id,
+            buffered_item_count=buffered_item_count,
+        )
+        return result
 
     def telemetry(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.config.validate(require_identity=True)
-        return request_json(
+        log_event(
+            LOGGER,
+            "telemetry send started",
+            event_type="telemetry_send_started",
+            sensor_id=self.config.sensor_id,
+            sequence=payload.get("sequence"),
+            state_count=len(payload.get("states", [])),
+        )
+        result = request_json(
             self.config.server_url,
             "/api/v1/telemetry",
             method="POST",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
             payload=payload,
         )
+        log_event(
+            LOGGER,
+            "telemetry send succeeded",
+            event_type="telemetry_send_succeeded",
+            sensor_id=self.config.sensor_id,
+            sequence=payload.get("sequence"),
+        )
+        return result
 
     def status(self) -> dict[str, Any]:
         self.config.validate(require_identity=True)
         return request_json(
             self.config.server_url,
-            f"/api/v1/sensors/{self.config.sensor_id}",
+            f"/api/v1/sensors/{self.config.sensor_id}/status",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
         )
 
@@ -81,14 +112,28 @@ class SensorAgent:
         self._adapter: LiveTelemetryAdapter | None = None
         self._next_retry_at = 0.0
         self._retry_delay = config.retry_base_seconds
+        self._pending_since: float | None = None
+        self._batcher = TelemetryBatcher(
+            config.sensor_id or "",
+            sequence_start=config.next_sequence,
+            batch_size=config.batch_size,
+            on_sequence_advanced=self._persist_next_sequence,
+        )
+
+    def _persist_next_sequence(self, next_sequence: int) -> None:
+        self.config.next_sequence = next_sequence
+        self.config.save()
 
     def _payload(self, states: list[dict[str, Any]]) -> dict[str, Any]:
-        payload = {"schema_version": "1", "sensor_id": self.config.sensor_id, "sequence": self.config.next_sequence, "sent_at": time.time(), "states": states}
-        # The API accepts ISO timestamps; keep sent_at explicit and UTC.
-        from datetime import datetime, timezone
-        payload["sent_at"] = datetime.now(timezone.utc).isoformat()
-        self.config.next_sequence += 1
-        self.config.save()
+        payload = self._batcher.build(states)
+        log_event(
+            LOGGER,
+            "telemetry batch created",
+            event_type="telemetry_batch_created",
+            sensor_id=self.config.sensor_id,
+            sequence=payload["sequence"],
+            state_count=len(states),
+        )
         return payload
 
     def submit_states(self, states: list[dict[str, Any]]) -> str:
@@ -99,9 +144,43 @@ class SensorAgent:
             self.client.telemetry(payload)
             return "sent"
         except TransportError as exc:
+            log_event(
+                LOGGER,
+                "telemetry send failed",
+                event_type="telemetry_send_failed",
+                sensor_id=self.config.sensor_id,
+                sequence=payload["sequence"],
+                status_code=exc.status_code,
+            )
             if exc.status_code is not None and exc.status_code not in {408, 425, 429, 500, 502, 503, 504}:
+                log_event(
+                    LOGGER,
+                    "telemetry rejected permanently",
+                    event_type="telemetry_rejected",
+                    sensor_id=self.config.sensor_id,
+                    sequence=payload["sequence"],
+                    status_code=exc.status_code,
+                )
                 raise RuntimeError(f"central service rejected telemetry: {exc}") from exc
-            self.buffer.enqueue(payload)
+            try:
+                self.buffer.enqueue(payload)
+            except BufferFullError:
+                log_event(
+                    LOGGER,
+                    "telemetry buffer full",
+                    event_type="telemetry_buffer_full",
+                    sensor_id=self.config.sensor_id,
+                    sequence=payload["sequence"],
+                )
+                raise
+            log_event(
+                LOGGER,
+                "telemetry buffered after transient failure",
+                event_type="telemetry_buffered",
+                sensor_id=self.config.sensor_id,
+                sequence=payload["sequence"],
+                status_code=exc.status_code,
+            )
             return "buffered"
 
     def flush_buffer(self) -> int:
@@ -116,9 +195,26 @@ class SensorAgent:
                 self.client.telemetry(item)
             except TransportError as exc:
                 if exc.status_code is not None and exc.status_code not in {408, 425, 429, 500, 502, 503, 504}:
+                    log_event(
+                        LOGGER,
+                        "buffered telemetry rejected permanently",
+                        event_type="telemetry_rejected",
+                        sensor_id=self.config.sensor_id,
+                        sequence=item["sequence"],
+                        status_code=exc.status_code,
+                    )
                     raise RuntimeError(f"central service rejected buffered telemetry: {exc}") from exc
                 self._next_retry_at = time.monotonic() + self._retry_delay
                 self._retry_delay = min(self._retry_delay * 2, 60.0)
+                log_event(
+                    LOGGER,
+                    "buffered telemetry retry scheduled",
+                    event_type="telemetry_retry",
+                    sensor_id=self.config.sensor_id,
+                    sequence=item["sequence"],
+                    status_code=exc.status_code,
+                    retry_delay_seconds=self._retry_delay,
+                )
                 return delivered
             self.buffer.pop(int(item["sequence"]))
             self._retry_delay = self.config.retry_base_seconds
@@ -130,12 +226,23 @@ class SensorAgent:
             # Keep loss explicit. The main loop will drain; the adapter records rejection.
             return False
         self._pending.append(state)
+        if self._pending_since is None:
+            self._pending_since = time.monotonic()
         return True
 
-    def _drain_pending(self) -> None:
-        while len(self._pending) >= self.config.batch_size:
-            states = [self._pending.popleft() for _ in range(self.config.batch_size)]
+    def _drain_pending(self, *, force: bool = False) -> None:
+        while self._pending:
+            ready_by_size = len(self._pending) >= self.config.batch_size
+            ready_by_time = (
+                self._pending_since is not None
+                and time.monotonic() - self._pending_since >= self.config.batch_interval_seconds
+            )
+            if not force and not (ready_by_size or ready_by_time):
+                return
+            count = min(self.config.batch_size, len(self._pending))
+            states = [self._pending.popleft() for _ in range(count)]
             self.submit_states(states)
+            self._pending_since = time.monotonic() if self._pending else None
 
     def run(self) -> None:
         self.config.pid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,10 +273,7 @@ class SensorAgent:
                 self._adapter.stop()
             if self._collector is not None:
                 self._collector.flush()
-            self._drain_pending()
-            if self._pending:
-                self.submit_states(list(self._pending))
-                self._pending.clear()
+            self._drain_pending(force=True)
             self.flush_buffer()
             try:
                 self.config.pid_path.unlink()

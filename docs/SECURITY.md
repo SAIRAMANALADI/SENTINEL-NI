@@ -26,6 +26,12 @@ This document is the technical companion to the repository-level
 - no raw packet payload forwarding or secret logging;
 - isolated per-sensor runtime histories.
 
+Remote telemetry is out-of-band: the monitored application continues to
+receive customer traffic directly. The agent sends only completed aggregate
+states over the authenticated telemetry endpoint; it does not forward raw
+packets or customer payloads and does not block requests. Delivery is bounded
+at-least-once with sequence/hash deduplication, not exactly-once.
+
 ## Distributed sensor deployment
 
 Put the API behind HTTPS, use a private network or firewall allowlist, inject

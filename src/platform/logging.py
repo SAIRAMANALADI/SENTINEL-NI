@@ -21,7 +21,19 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "request_id": REQUEST_ID.get(),
         }
-        for key in ("endpoint", "event_type", "duration_ms", "error_type", "model_version"):
+        for key in (
+            "endpoint",
+            "event_type",
+            "duration_ms",
+            "error_type",
+            "model_version",
+            "sensor_id",
+            "sequence",
+            "state_count",
+            "status_code",
+            "buffered_item_count",
+            "retry_delay_seconds",
+        ):
             value = getattr(record, key, None)
             if value is not None:
                 payload[key] = value
@@ -52,4 +64,3 @@ def reset_request_id(token: contextvars.Token[str]) -> None:
 def log_event(logger: logging.Logger, message: str, **fields: Any) -> None:
     safe_fields = {key: value for key, value in fields.items() if key not in {"token", "password", "secret", "payload"}}
     logger.info(message, extra=safe_fields)
-

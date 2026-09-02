@@ -173,6 +173,13 @@ class RemoteStatePoint(BaseModel):
     capture_day: date
     features: dict[str, FiniteFloat] = Field(min_length=17, max_length=17)
 
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("state timestamp must include a timezone")
+        return value
+
 
 class RemoteTelemetryBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -182,3 +189,10 @@ class RemoteTelemetryBatch(BaseModel):
     sequence: int = Field(ge=1)
     sent_at: datetime
     states: list[RemoteStatePoint] = Field(min_length=1, max_length=MAX_REMOTE_STATES_PER_BATCH)
+
+    @field_validator("sent_at")
+    @classmethod
+    def sent_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("sent_at must include a timezone")
+        return value

@@ -15,6 +15,30 @@ Returns 200 while the process is responding:
 
 {"status":"ok","service_state":"HEALTHY","request_id":"..."}
 
+## Sensor control-plane endpoints
+
+`POST /sensors/enrollment` is admin-only and returns a short-lived, one-time
+enrollment credential. `POST /sensors/register` consumes that credential and
+returns the new sensor ID and runtime credential once; it is not a browser
+enrollment operation.
+
+Viewer-role users may read `GET /sensors` and
+`GET /sensors/{sensor_id}` for operational metadata. A sensor credential may
+read only its own `GET /sensors/{sensor_id}/status` endpoint and send its own
+heartbeat. Sensor GET responses never include runtime credentials or their
+hashes. Registration alone reports `REGISTERED`; `ONLINE` requires fresh
+heartbeat and telemetry.
+
+## POST /telemetry
+
+Remote agents send the version-1 state-only envelope documented in
+[`REMOTE_TELEMETRY_CONTRACT.md`](REMOTE_TELEMETRY_CONTRACT.md), authenticated
+with `X-Sentinel-Sensor-Token`. The body sensor ID must match the credential.
+Accepted batches are routed to the isolated sensor runtime; duplicate
+sequence/hash pairs are acknowledged without running inference again.
+Malformed, non-finite, timezone-naive, cross-day, non-contiguous, oversized,
+rate-limited, or out-of-order telemetry is rejected.
+
 ## GET /ready
 
 Checks configuration, schema, policy, model dimensions/load, and telemetry

@@ -106,10 +106,11 @@ Run Central Sentinel behind HTTPS, a firewall or private network, and
 environment-injected credentials. Do not expose the internal application port
 directly to the public internet.
 
-An administrator creates a one-time enrollment credential from the dashboard
-Connected servers view or with the API. On the remote server:
+An administrator creates a one-time enrollment credential through the
+server-side admin API. The browser does not receive the administrator token.
+On the remote server:
 
-    python -m src.agent init --server-url https://sentinel.example --interface "Ethernet"
+    python -m src.agent init --server-url https://sentinel.example --interface "Ethernet" --environment production
     python -m src.agent register --enrollment-token <one-time-enrollment-token>
     python -m src.agent start
     python -m src.agent status
@@ -202,16 +203,16 @@ isolation, and high availability are future hardening work.
 
 The current repository verification record includes:
 
-    python -m pytest -q       224 passed
+    python -m pytest -q       237 passed
     npm run typecheck         passed
     npm run build             passed
     docker compose config     passed
 
 Remote-sensor coverage includes enrollment, authentication, telemetry
 validation, duplicate and rate-limit handling, bounded buffering, a real
-LSTM-path telemetry test, and multi-sensor runtime isolation. See the
-[implementation report](docs/DISTRIBUTED_SENSOR_IMPLEMENTATION_REPORT.md) for
-the exact evidence and remaining deployment work.
+agent-to-central HTTP path reaching the LSTM, and multi-sensor runtime
+isolation. See the [remote telemetry implementation report](docs/REMOTE_TELEMETRY_IMPLEMENTATION_REPORT.md)
+for the exact evidence and remaining deployment work.
 
 ## Repository map
 
@@ -230,7 +231,8 @@ the exact evidence and remaining deployment work.
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Distributed Sensor Architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md)
-- [Remote Telemetry Contract](docs/REMOTE_TELEMETRY.md)
+- [Remote Telemetry](docs/REMOTE_TELEMETRY.md)
+- [Remote Telemetry Contract](docs/REMOTE_TELEMETRY_CONTRACT.md)
 - [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
 - [Sensor Operations](docs/SENSOR_OPERATIONS.md)
 - [Security Boundaries](docs/SECURITY.md)

@@ -25,6 +25,9 @@ class AuditLogger:
         candidate_source: str | None = None,
         mitigation_recommendation: str | None = None,
         session_id: str | None = None,
+        sensor_id: str | None = None,
+        sequence: int | None = None,
+        result: str | None = None,
     ) -> dict[str, Any]:
         record: dict[str, Any] = {
             "event_id": str(uuid.uuid4()),
@@ -39,6 +42,12 @@ class AuditLogger:
         }
         if session_id is not None:
             record["session_id"] = str(session_id)
+        if sensor_id is not None:
+            record["sensor_id"] = str(sensor_id)
+        if sequence is not None:
+            record["sequence"] = int(sequence)
+        if result is not None:
+            record["result"] = str(result)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, allow_nan=False) + "\n")

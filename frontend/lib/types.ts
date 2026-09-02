@@ -145,7 +145,7 @@ export interface SensorSummary {
   sensor_id: string;
   hostname: string;
   agent_version: string;
-  status: "ONLINE" | "DEGRADED" | "OFFLINE";
+  status: "REGISTERED" | "ONLINE" | "DEGRADED" | "OFFLINE";
   last_seen?: string | null;
   last_heartbeat?: string | null;
   last_telemetry_at?: string | null;

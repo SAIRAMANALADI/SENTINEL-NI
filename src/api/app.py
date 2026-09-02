@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -305,7 +306,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.app.state.runtime.metrics.increment("validation_error_count")
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=_error_payload("VALIDATION_ERROR", "request validation failed", request, details=exc.errors()),
+            content=_error_payload(
+                "VALIDATION_ERROR",
+                "request validation failed",
+                request,
+                details=jsonable_encoder(exc.errors(), custom_encoder={ValueError: str}),
+            ),
         )
 
     @app.exception_handler(HTTPException)
@@ -358,6 +364,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"code": "INVALID_ENROLLMENT", "message": "enrollment credential is invalid or expired"},
             ) from exc
+        log_event(LOGGER, "sensor registered", event_type="registration_succeeded", sensor_id=registered["sensor_id"])
+        runtime.audit.record(
+            event_type="sensor_registration",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            sensor_id=registered["sensor_id"],
+            result="accepted",
+        )
         return {"schema_version": "1", **registered}
 
     @app.get("/api/v1/sensors")
@@ -370,6 +384,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/sensors/{sensor_id}")
     async def get_sensor(sensor_id: str, _: str = Depends(require_role("viewer"))) -> dict[str, Any]:
+        return sensor_view(sensor_id)
+
+    @app.get("/api/v1/sensors/{sensor_id}/status")
+    async def get_sensor_status(
+        sensor_id: str,
+        sensor: dict[str, Any] = Depends(require_sensor),
+    ) -> dict[str, Any]:
+        """Return only the authenticated sensor's operational status."""
+
+        del sensor
         return sensor_view(sensor_id)
 
     @app.post("/api/v1/sensors/{sensor_id}/heartbeat")
@@ -390,6 +414,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor heartbeat rate limit exceeded"},
             ) from exc
         del sensor
+        log_event(
+            LOGGER,
+            "sensor heartbeat accepted",
+            event_type="heartbeat_succeeded",
+            sensor_id=sensor_id,
+            buffered_item_count=body.buffered_item_count,
+        )
+        runtime.audit.record(
+            event_type="sensor_heartbeat",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            sensor_id=sensor_id,
+            result="accepted",
+        )
         return sensor_view(sensor_id)
 
     @app.post("/api/v1/telemetry")
@@ -399,6 +437,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         sensor_id = str(sensor["sensor_id"])
         if body.sensor_id != sensor_id:
+            log_event(
+                LOGGER,
+                "telemetry identity mismatch",
+                event_type="telemetry_rejected",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+            )
+            runtime.audit.record(
+                event_type="telemetry_rejected",
+                model_version="telemetry-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+                result="identity_mismatch",
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "SENSOR_ID_MISMATCH", "message": "telemetry identity does not match the credential"},
@@ -422,11 +475,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 sensor_id, sequence=body.sequence, batch_hash=batch_hash
             )
         except SensorSequenceConflict as exc:
+            log_event(
+                LOGGER,
+                "telemetry sequence conflict",
+                event_type="telemetry_rejected",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+            )
+            runtime.audit.record(
+                event_type="telemetry_rejected",
+                model_version="telemetry-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+                result="sequence_conflict",
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "SENSOR_SEQUENCE_CONFLICT", "message": str(exc)},
             ) from exc
         if decision == "duplicate":
+            log_event(
+                LOGGER,
+                "duplicate telemetry acknowledged",
+                event_type="telemetry_duplicate",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+            )
+            runtime.audit.record(
+                event_type="telemetry_duplicate",
+                model_version="telemetry-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+                result="duplicate_acknowledged",
+            )
             return {
                 "schema_version": "1",
                 "sensor_id": sensor_id,
@@ -455,6 +538,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},
             ) from exc
+        log_event(
+            LOGGER,
+            "telemetry batch accepted",
+            event_type="telemetry_accepted",
+            sensor_id=sensor_id,
+            sequence=body.sequence,
+            state_count=len(body.states),
+        )
+        runtime.audit.record(
+            event_type="telemetry_accepted",
+            model_version="telemetry-v1",
+            policy_version="sensor-v1",
+            sensor_id=sensor_id,
+            sequence=body.sequence,
+            result="accepted",
+        )
         return {
             "schema_version": "1",
             "sensor_id": sensor_id,

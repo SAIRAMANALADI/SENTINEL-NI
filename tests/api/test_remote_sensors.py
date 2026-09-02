@@ -116,6 +116,21 @@ def test_remote_telemetry_reaches_the_real_lstm_after_ten_states(tmp_path: Path)
     assert response.json()["forecast"]["forecast_updates"] == 1
 
 
+def test_remote_telemetry_rejects_naive_timestamps(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    body = {
+        "schema_version": "1",
+        "sensor_id": sensor_id,
+        "sequence": 1,
+        "sent_at": "2026-09-02T12:00:00",
+        "states": [_state("2018-02-22T01:00:00")],
+    }
+    response = client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_two_remote_sensors_keep_forecast_histories_isolated(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
     sensor_a, token_a = _register(client)
