@@ -194,3 +194,50 @@ def test_three_remote_sensors_keep_health_and_state_identity_under_concurrent_in
     assert [item["runtime"]["state_count"] for item in details] == [2, 2, 2]
     assert {item["sensor_id"] for item in details} == {sensor_id for sensor_id, _ in credentials}
     assert all(item["runtime"]["sensor_id"] == item["sensor_id"] for item in details)
+
+
+def test_fleet_endpoint_is_compact_and_reports_actual_counts(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    for _ in range(5):
+        _register(client)
+    response = client.get("/api/v1/sensors", headers={"Authorization": "Bearer viewer-test"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 5
+    assert body["health"]["sensor_count"] == 5
+    assert body["health"]["forecast_waiting_count"] == 5
+    assert all("runtime" not in sensor and sensor["forecast_ready"] is False for sensor in body["sensors"])
+
+
+def test_sensor_forecast_is_sensor_scoped_and_pending_is_not_an_error(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    pending = client.get(f"/api/v1/sensors/{sensor_id}/forecast", headers={"Authorization": "Bearer viewer-test"})
+    assert pending.status_code == 200
+    assert pending.json()["forecast_ready"] is False
+    assert pending.json()["forecast"] is None
+    assert client.get("/api/v1/sensors/sensor-0000000000000000/forecast", headers={"Authorization": "Bearer viewer-test"}).status_code == 404
+
+    body = {"schema_version": "1", "sensor_id": sensor_id, "sequence": 1,
+            "sent_at": datetime.now(timezone.utc).isoformat(), "states": [_state()]}
+    assert client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token}).status_code == 200
+    ready = client.get(f"/api/v1/sensors/{sensor_id}/forecast", headers={"Authorization": "Bearer viewer-test"})
+    assert ready.status_code == 200
+    assert ready.json()["sensor_id"] == sensor_id
+    assert ready.json()["forecast_ready"] is False
+
+
+def test_disabled_sensor_is_not_deleted_and_cannot_send_future_telemetry(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    disabled = client.post(f"/api/v1/sensors/{sensor_id}/disable", headers={"Authorization": "Bearer operator-test"})
+    assert disabled.status_code == 200
+    assert disabled.json()["disabled"] is True
+    assert disabled.json()["status"] == "OFFLINE"
+    assert disabled.json()["registration_state"] == "DISABLED"
+
+    body = {"schema_version": "1", "sensor_id": sensor_id, "sequence": 1,
+            "sent_at": datetime.now(timezone.utc).isoformat(), "states": [_state()]}
+    rejected = client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token})
+    assert rejected.status_code == 401
+    assert "runtime_token" not in disabled.text

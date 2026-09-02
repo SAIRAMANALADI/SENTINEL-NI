@@ -52,6 +52,23 @@ schema locally, and sends bounded state batches to the central API. It never
 forwards raw packet payloads. The browser communicates only with Central
 Sentinel, never directly with remote agents.
 
+## Telemetry sources
+
+Sentinel keeps collection separate from forecasting through one bounded
+collector contract. The existing Scapy/Npcap/libpcap path, authenticated
+Remote Agent path, Replay, and test-only Mock source are available today.
+Zeek `conn.log` ingestion is a real partial integration: it validates and
+normalizes documented JSON-lines or TSV connection records, but it is not
+forecast-compatible by itself because the log lacks required packet-size,
+flow-IAT, and TCP flag-count fields. NetFlow and IPFIX are explicit planned
+extension points, not enabled listeners.
+
+All sources remain out of band from customer application traffic. Source
+identity and capability metadata are operational controls, never model
+features. Read [Telemetry Sources](docs/TELEMETRY_SOURCES.md), [Zeek
+Integration](docs/ZEEK_INTEGRATION.md), and [Telemetry Source Security](docs/TELEMETRY_SOURCE_SECURITY.md)
+before configuring an external collector.
+
 ## What Sentinel provides
 
 | Capability | Behaviour |
@@ -110,16 +127,28 @@ An administrator creates a one-time enrollment credential through the
 server-side admin API. The browser does not receive the administrator token.
 On the remote server:
 
-    python -m src.agent init --server-url https://sentinel.example --interface "Ethernet" --environment production
-    python -m src.agent register --enrollment-token <one-time-enrollment-token>
-    python -m src.agent start
-    python -m src.agent status
+    sentinel-agent init --server-url https://sentinel.example --interface "Ethernet" --environment production
+    sentinel-agent register --enrollment-token <one-time-enrollment-token>
+    sentinel-agent config validate
+    sentinel-agent start
+    sentinel-agent status
+
+On Linux, install it as a user systemd service after registration:
+
+    sentinel-agent service install
+    systemctl --user enable --now sentinel-agent
+
+Windows-native service installation is not included in this release; use an
+approved Windows service manager to launch the installed command. The agent
+requires only outbound connectivity from the customer server and observes the
+application interface in parallel.
 
 The central dashboard reports registration, heartbeat freshness, telemetry
 freshness, buffer depth, history readiness, and the sensor-scoped forecast. It
 does not report a sensor as online merely because it was registered.
 
-Read the [sensor installation guide](docs/SENSOR_INSTALLATION.md), the
+Read the [agent installation guide](docs/AGENT_INSTALLATION.md), the
+[agent operations guide](docs/AGENT_OPERATIONS.md), the
 [distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md), and the
 [sensor security guide](docs/SENSOR_SECURITY.md) before deployment.
 
@@ -179,7 +208,7 @@ the agent does not pretend unsent telemetry was delivered.
 | Forecasting | POST /api/v1/forecast, POST /api/v1/demo |
 | Source and mitigation | POST /api/v1/source-priority, POST /api/v1/mitigation |
 | Sensor onboarding | POST /api/v1/sensors/enrollment, POST /api/v1/sensors/register |
-| Sensor operations | GET /api/v1/sensors, GET /api/v1/sensors/{sensor_id}, POST /api/v1/sensors/{sensor_id}/heartbeat |
+| Sensor operations | GET /api/v1/sensors, GET /api/v1/sensors/{sensor_id}, GET /api/v1/sensors/{sensor_id}/forecast, POST /api/v1/sensors/{sensor_id}/heartbeat, POST /api/v1/sensors/{sensor_id}/disable |
 | Remote telemetry | POST /api/v1/telemetry |
 
 Interactive API documentation is available at /docs in development and is
@@ -206,7 +235,7 @@ isolation, and high availability are future hardening work.
 
 The current repository verification record includes:
 
-    python -m pytest -q       237 passed
+    python -m pytest -q       281 passed
     npm run typecheck         passed
     npm run build             passed
     docker compose config     passed
@@ -235,8 +264,18 @@ for the exact evidence and remaining deployment work.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Distributed Sensor Architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md)
 - [Remote Telemetry](docs/REMOTE_TELEMETRY.md)
+- [Telemetry Sources](docs/TELEMETRY_SOURCES.md)
+- [Zeek Integration](docs/ZEEK_INTEGRATION.md)
+- [NetFlow Integration](docs/NETFLOW_INTEGRATION.md)
+- [IPFIX Integration](docs/IPFIX_INTEGRATION.md)
+- [Telemetry Source Security](docs/TELEMETRY_SOURCE_SECURITY.md)
 - [Remote Telemetry Contract](docs/REMOTE_TELEMETRY_CONTRACT.md)
 - [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Agent Installation](docs/AGENT_INSTALLATION.md)
+- [Agent Operations](docs/AGENT_OPERATIONS.md)
+- [Agent Upgrades](docs/AGENT_UPGRADES.md)
+- [Agent Troubleshooting](docs/AGENT_TROUBLESHOOTING.md)
+- [Agent Security](docs/AGENT_SECURITY.md)
 - [Sensor Operations](docs/SENSOR_OPERATIONS.md)
 - [Security Boundaries](docs/SECURITY.md)
 - [Current Limitations](docs/LIMITATIONS.md)

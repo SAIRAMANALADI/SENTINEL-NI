@@ -149,6 +149,11 @@ export interface SensorSummary {
   last_seen?: string | null;
   last_heartbeat?: string | null;
   last_telemetry_at?: string | null;
+  last_telemetry?: string | null;
+  source_type?: string;
+  source_status?: string;
+  source_capabilities?: Record<string, unknown>;
+  last_event?: string | null;
   telemetry_freshness_seconds?: number | null;
   heartbeat_freshness_seconds?: number | null;
   buffered_item_count?: number;
@@ -158,9 +163,26 @@ export interface SensorSummary {
   last_sent_sequence?: number;
   last_state_timestamp?: string | null;
   capture_status?: string;
+  connection_status?: string;
   agent_status?: string;
   telemetry_status?: string;
   agent_last_error?: string | null;
   health?: { agent?: string; telemetry?: string; forecast?: string };
+  forecast_ready?: boolean;
+  latest_warning?: boolean;
+  state_count?: number;
+  history_length?: number;
+  history_required?: number;
+  lifecycle_state?: string;
+  disabled?: boolean;
   runtime?: SensorRuntime;
+}
+
+export interface FleetHealth {
+  sensor_count: number;
+  online_sensor_count: number;
+  degraded_sensor_count: number;
+  offline_sensor_count: number;
+  active_warning_count: number;
+  forecast_waiting_count: number;
 }

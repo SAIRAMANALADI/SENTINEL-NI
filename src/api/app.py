@@ -44,6 +44,7 @@ from src.platform.audit import AuditLogger
 from src.platform.config import Settings
 from src.platform.logging import configure_logging, get_logger, log_event, reset_request_id, set_request_id
 from src.platform.metrics import MetricsRegistry
+from src.platform.rate_limit import RateLimitExceeded, SlidingWindowRateLimiter
 from src.platform.state import ServiceState
 from src.streaming.final_demo_engine import run_final_demo
 from src.api.live_runtime import LiveRuntimeStore
@@ -53,16 +54,17 @@ from src.sensors.registry import (
     SensorRateLimitExceeded,
     SensorRegistry,
     SensorSequenceConflict,
+    SensorDisabled,
 )
+from src.sensors.manager import SensorManager
 from src.sensors.runtime import RemoteSensorRuntimeStore
 from src.telemetry.live import (
     LiveTelemetryError,
     LiveTelemetryPermissionDenied,
     LiveTelemetryUnavailable,
-    LiveTelemetryAdapter,
 )
-from src.telemetry.mock import MockTelemetryAdapter
-from src.telemetry.replay import ReplayTelemetryAdapter
+from src.telemetry.collectors.registry import CollectorRegistry
+from src.telemetry.contracts import SourceType
 
 
 LOGGER = get_logger(__name__)
@@ -84,22 +86,26 @@ class Runtime:
             telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
             rate_limit_per_minute=settings.sensor_rate_limit_per_minute,
         )
-        self.remote_sensor_runtime = RemoteSensorRuntimeStore()
+        self.remote_sensor_runtime = RemoteSensorRuntimeStore(max_sensors=settings.max_sensor_count)
+        self.sensor_manager = SensorManager(self.sensor_registry, self.remote_sensor_runtime)
+        self.registration_limiter = SlidingWindowRateLimiter(settings.registration_rate_limit_per_minute)
 
     def _on_live_event(self, event: dict[str, Any]) -> bool:
         return self.live_runtime.ingest_event(event)
 
     def _build_telemetry_adapter(self) -> Any:
+        registry = CollectorRegistry.default()
         if self.settings.telemetry_mode == "live":
-            return LiveTelemetryAdapter(
-                self.settings.telemetry_interface,
+            return registry.create(
+                SourceType.LOCAL_PACKET_CAPTURE,
+                interface=self.settings.telemetry_interface,
                 stale_after_seconds=self.settings.telemetry_stale_after_seconds,
                 event_callback=self._on_live_event,
             )
         if self.settings.telemetry_mode == "replay":
             path = self.settings.telemetry_replay_path or self.settings.demo_events_path
-            return ReplayTelemetryAdapter(path)
-        return MockTelemetryAdapter()
+            return registry.create(SourceType.REPLAY, path=path)
+        return registry.create(SourceType.MOCK)
 
     def readiness(self, *, refresh: bool = False) -> dict[str, Any]:
         if self._static_readiness is None or refresh:
@@ -289,6 +295,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Referrer-Policy", "no-referrer")
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            )
+            if request.url.scheme.lower() == "https":
+                response.headers.setdefault(
+                    "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+                )
             if response.status_code >= 400:
                 runtime.metrics.increment("error_count")
             return response
@@ -328,9 +342,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         request.app.state.runtime.metrics.increment("contract_error_count")
+        message = str(exc)
+        if request.app.state.runtime.settings.environment == "production":
+            message = "request could not be processed"
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=_error_payload("CONTRACT_ERROR", str(exc), request),
+            content=_error_payload("CONTRACT_ERROR", message, request),
         )
 
     def sensor_view(sensor_id: str) -> dict[str, Any]:
@@ -341,23 +358,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
             ) from exc
-        sensor["runtime"] = runtime.remote_sensor_runtime.snapshot(sensor_id)
-        sensor["health"] = {
-            "agent": sensor.get("agent_status", "UNKNOWN"),
-            "telemetry": sensor.get("telemetry_status", "UNKNOWN"),
-            "forecast": "READY" if sensor["runtime"].get("forecast_status") == "FORECAST_READY" else "WAITING",
-        }
-        return sensor
+        return runtime.sensor_manager.detail(sensor_id)
 
     @app.post("/api/v1/sensors/enrollment")
     async def create_sensor_enrollment(
+        request: Request,
         body: SensorEnrollmentRequest,
         _: str = Depends(require_role("admin")),
     ) -> dict[str, Any]:
-        return runtime.sensor_registry.create_enrollment(expires_in_seconds=body.expires_in_seconds)
+        result = runtime.sensor_registry.create_enrollment(expires_in_seconds=body.expires_in_seconds)
+        runtime.audit.record(
+            event_type="sensor_enrollment_issued",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            result="issued",
+            reason=f"expires_in_seconds={body.expires_in_seconds}",
+            request_id=request.state.request_id,
+            source_ip=request.client.host if request.client else None,
+        )
+        return result
 
     @app.post("/api/v1/sensors/register")
-    async def register_sensor(body: SensorRegisterRequest) -> dict[str, Any]:
+    async def register_sensor(request: Request, body: SensorRegisterRequest) -> dict[str, Any]:
+        source_ip = request.client.host if request.client else "unknown"
+        try:
+            runtime.registration_limiter.check(f"registration:{source_ip}")
+        except RateLimitExceeded as exc:
+            runtime.audit.record(
+                event_type="sensor_registration_rejected",
+                model_version="control-plane-v1",
+                policy_version="sensor-v1",
+                result="rate_limited",
+                reason="registration rate limit exceeded",
+                request_id=request.state.request_id,
+                source_ip=source_ip,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "REGISTRATION_RATE_LIMITED", "message": "registration rate limit exceeded"},
+            ) from exc
         try:
             registered = runtime.sensor_registry.register(
                 enrollment_token=body.enrollment_token,
@@ -365,6 +404,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 agent_version=body.agent_version,
             )
         except InvalidEnrollment as exc:
+            runtime.audit.record(
+                event_type="sensor_registration_rejected",
+                model_version="control-plane-v1",
+                policy_version="sensor-v1",
+                result="invalid_enrollment",
+                reason="enrollment credential invalid, expired, or already consumed",
+                request_id=request.state.request_id,
+                source_ip=source_ip,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"code": "INVALID_ENROLLMENT", "message": "enrollment credential is invalid or expired"},
@@ -376,16 +424,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             policy_version="sensor-v1",
             sensor_id=registered["sensor_id"],
             result="accepted",
+            request_id=request.state.request_id,
+            source_ip=source_ip,
+        )
+        runtime.audit.record(
+            event_type="sensor_credential_issued",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            sensor_id=registered["sensor_id"],
+            result="issued_once",
+            request_id=request.state.request_id,
+            source_ip=source_ip,
         )
         return {"schema_version": "1", **registered}
 
     @app.get("/api/v1/sensors")
     async def list_sensors(_: str = Depends(require_role("viewer"))) -> dict[str, Any]:
-        sensors = []
-        for sensor in runtime.sensor_registry.list():
-            sensor["runtime"] = runtime.remote_sensor_runtime.snapshot(sensor["sensor_id"])
-            sensors.append(sensor)
-        return {"count": len(sensors), "sensors": sensors}
+        sensors = runtime.sensor_manager.fleet_summary()
+        return {"count": len(sensors), "sensors": sensors, "health": runtime.sensor_manager.fleet_health()}
+
+    @app.get("/api/v1/sensors/{sensor_id}/forecast")
+    async def get_sensor_forecast(sensor_id: str, _: str = Depends(require_role("viewer"))) -> dict[str, Any]:
+        try:
+            # Detail lookup establishes the 404 contract without running inference.
+            runtime.sensor_registry.get(sensor_id)
+            return runtime.sensor_manager.forecast(sensor_id)
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
 
     @app.get("/api/v1/sensors/{sensor_id}")
     async def get_sensor(sensor_id: str, _: str = Depends(require_role("viewer"))) -> dict[str, Any]:
@@ -400,6 +468,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         del sensor
         return sensor_view(sensor_id)
+
+    @app.post("/api/v1/sensors/{sensor_id}/disable")
+    async def disable_sensor(
+        request: Request,
+        sensor_id: str,
+        _: str = Depends(require_role("operator")),
+    ) -> dict[str, Any]:
+        try:
+            result = runtime.sensor_manager.disable(sensor_id)
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+        runtime.audit.record(
+            event_type="sensor_disabled",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            sensor_id=sensor_id,
+            result="disabled",
+            reason="operator requested non-destructive disable",
+            request_id=request.state.request_id,
+            source_ip=request.client.host if request.client else None,
+        )
+        log_event(LOGGER, "sensor disabled", event_type="sensor_disabled", sensor_id=sensor_id)
+        return result
+
+    @app.post("/api/v1/sensors/{sensor_id}/rotate-credential")
+    async def rotate_sensor_credential(
+        request: Request,
+        sensor_id: str,
+        _: str = Depends(require_role("admin")),
+    ) -> dict[str, Any]:
+        try:
+            result = runtime.sensor_manager.rotate(sensor_id)
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+        except SensorDisabled as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "SENSOR_DISABLED", "message": "disabled sensors cannot rotate credentials"},
+            ) from exc
+        rotation = result.pop("credential_rotation")
+        runtime.audit.record(
+            event_type="sensor_credential_rotated",
+            model_version="control-plane-v1",
+            policy_version="sensor-v1",
+            sensor_id=sensor_id,
+            result="issued_and_old_revoked",
+            reason="operator must deliver the new credential out of band",
+            request_id=request.state.request_id,
+            source_ip=request.client.host if request.client else None,
+        )
+        return {**result, "credential_rotation": rotation}
 
     @app.post("/api/v1/sensors/{sensor_id}/heartbeat")
     async def sensor_heartbeat(
@@ -421,6 +546,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 last_error=body.last_error,
             )
         except SensorRateLimitExceeded as exc:
+            runtime.audit.record(
+                event_type="heartbeat_rejected",
+                model_version="control-plane-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                result="rate_limited",
+                reason="sensor heartbeat rate limit exceeded",
+                request_id=request.state.request_id,
+                source_ip=request.client.host if request.client else None,
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor heartbeat rate limit exceeded"},
@@ -444,6 +579,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/telemetry")
     async def ingest_remote_telemetry(
+        request: Request,
         body: RemoteTelemetryBatch,
         sensor: dict[str, Any] = Depends(require_telemetry_sensor),
     ) -> dict[str, Any]:
@@ -532,20 +668,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             runtime.sensor_registry.check_rate(sensor_id)
         except SensorRateLimitExceeded as exc:
+            runtime.audit.record(
+                event_type="telemetry_rejected",
+                model_version="telemetry-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+                result="rate_limited",
+                reason="sensor telemetry rate limit exceeded",
+                request_id=request.state.request_id,
+                source_ip=request.client.host if request.client else None,
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},
             ) from exc
         states = [state.model_dump(mode="json") for state in body.states]
-        result = runtime.remote_sensor_runtime.ingest(sensor_id, states)
+        result = runtime.sensor_manager.ingest(sensor_id, states)
+        runtime.metrics.increment("telemetry_batches_received")
+        runtime.metrics.increment("runtime_state_count", len(states))
+        runtime.metrics.increment("forecast_updates", int(result.get("forecast_updates", 0)))
         try:
             runtime.sensor_registry.accept_telemetry(
                 sensor_id,
                 sequence=body.sequence,
                 batch_hash=batch_hash,
                 buffered_item_count=0,
+                last_event=body.states[-1].timestamp.isoformat(),
             )
         except SensorRateLimitExceeded as exc:
+            runtime.audit.record(
+                event_type="telemetry_rejected",
+                model_version="telemetry-v1",
+                policy_version="sensor-v1",
+                sensor_id=sensor_id,
+                sequence=body.sequence,
+                result="rate_limited",
+                reason="sensor telemetry rate limit exceeded while committing",
+                request_id=request.state.request_id,
+                source_ip=request.client.host if request.client else None,
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},

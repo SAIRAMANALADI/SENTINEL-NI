@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 import time
 from typing import Any
 
@@ -40,13 +42,33 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=True, allow_nan=False)
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(
+    level: str = "INFO",
+    *,
+    log_path: str | Path | None = None,
+    max_bytes: int = 10 * 1024 * 1024,
+    backup_count: int = 5,
+) -> None:
     root = logging.getLogger()
     root.setLevel(level)
     if not root.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(JsonFormatter())
         root.addHandler(handler)
+    if log_path is not None:
+        path = Path(log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        resolved = path.resolve()
+        if not any(
+            isinstance(handler, RotatingFileHandler)
+            and Path(getattr(handler, "baseFilename", "")).resolve() == resolved
+            for handler in root.handlers
+        ):
+            file_handler = RotatingFileHandler(
+                path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+            )
+            file_handler.setFormatter(JsonFormatter())
+            root.addHandler(file_handler)
 
 
 def get_logger(name: str) -> logging.Logger:

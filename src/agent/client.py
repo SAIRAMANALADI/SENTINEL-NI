@@ -17,8 +17,9 @@ from src.agent.config import AgentConfig
 from src.agent.identity import hostname
 from src.agent.telemetry import TelemetryBatcher
 from src.agent.transport import TransportError, request_json
+from src.agent.validation import validate_startup
 from src.telemetry.live import LiveTelemetryAdapter
-from src.platform.logging import get_logger, log_event
+from src.platform.logging import configure_logging, get_logger, log_event
 
 
 LOGGER = get_logger(__name__)
@@ -37,6 +38,15 @@ class SensorClient:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
 
+    def _transport_options(self) -> dict[str, Any]:
+        return {
+            "timeout": self.config.connection_timeout_seconds,
+            "ca_path": str(self.config.tls_ca_path) if self.config.tls_ca_path else None,
+            "client_cert_path": str(self.config.tls_client_cert_path) if self.config.tls_client_cert_path else None,
+            "client_key_path": str(self.config.tls_client_key_path) if self.config.tls_client_key_path else None,
+            "verify_tls": self.config.tls_verify,
+        }
+
     def _url(self, path: str) -> str:
         return f"{self.config.server_url.rstrip('/')}{path}"
 
@@ -46,6 +56,7 @@ class SensorClient:
             "/api/v1/sensors/register",
             method="POST",
             payload={"enrollment_token": enrollment_token, "hostname": hostname(), "agent_version": self.config.agent_version},
+            **self._transport_options(),
         )
         log_event(LOGGER, "sensor registration succeeded", event_type="registration_succeeded")
         return result
@@ -58,6 +69,7 @@ class SensorClient:
             method="POST",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
             payload={"buffered_item_count": buffered_item_count, "agent_version": self.config.agent_version, **metadata},
+            **self._transport_options(),
         )
         log_event(
             LOGGER,
@@ -84,6 +96,7 @@ class SensorClient:
             method="POST",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
             payload=payload,
+            **self._transport_options(),
         )
         log_event(
             LOGGER,
@@ -100,6 +113,7 @@ class SensorClient:
             self.config.server_url,
             f"/api/v1/sensors/{self.config.sensor_id}/status",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
+            **self._transport_options(),
         )
 
 
@@ -132,6 +146,7 @@ class SensorAgent:
         self._last_acknowledged_sequence = 0
         self._last_error: str | None = None
         self._last_error_category: str | None = None
+        self._connection_status = "DISCONNECTED"
         self._counters = {"states_collected": 0, "batches_sent": 0, "batches_buffered": 0, "retries": 0, "permanent_rejections": 0}
         self._batcher = TelemetryBatcher(
             config.sensor_id or "",
@@ -263,6 +278,7 @@ class SensorAgent:
             self._last_acknowledged_sequence = max(self._last_acknowledged_sequence, int(payload["sequence"]))
         self._last_error = None
         self._last_error_category = None
+        self._connection_status = "CONNECTED"
 
     def _remember_error(self, error: Exception, category: str) -> None:
         self._last_error = str(error)[:240]
@@ -282,11 +298,14 @@ class SensorAgent:
             )
         except TransportError as exc:
             self._remember_error(exc, "heartbeat_transport")
+            self._connection_status = "DISCONNECTED"
             return False
         except Exception as exc:
             self._remember_error(exc, "heartbeat_error")
+            self._connection_status = "DISCONNECTED"
             return False
         self._last_heartbeat_at = _utc_now()
+        self._connection_status = "CONNECTED"
         if self._last_error_category and self._last_error_category.startswith("heartbeat"):
             self._last_error = None
             self._last_error_category = None
@@ -323,16 +342,34 @@ class SensorAgent:
             self._pending_since = time.monotonic() if self._pending else None
 
     def run(self) -> None:
+        startup = validate_startup(self.config)
+        configure_logging(
+            self.config.log_level,
+            log_path=self.config.log_path,
+            max_bytes=self.config.log_max_bytes,
+            backup_count=self.config.log_backup_count,
+        )
+        log_event(LOGGER, "agent startup validated", event_type="agent_startup_validated", sensor_id=self.config.sensor_id)
         self.config.pid_path.parent.mkdir(parents=True, exist_ok=True)
         self.config.pid_path.write_text(str(os.getpid()), encoding="utf-8")
         self._collector = AgentCollector(interface=self.config.interface or "", on_state=self._on_state)
         self._adapter = LiveTelemetryAdapter(
             self.config.interface,
+            capture_filter=self.config.capture_filter,
             event_callback=self._collector.ingest_event,
             queue_size=max(1000, self.config.batch_size * 8),
         )
         self._running = True
+        previous_handlers: dict[int, Any] = {}
+
+        def request_shutdown(signum: int, _frame: Any) -> None:
+            log_event(LOGGER, "agent shutdown requested", event_type="shutdown_requested", sensor_id=self.config.sensor_id, status_code=signum)
+            self.stop()
+
         try:
+            for signal_number in (signal.SIGTERM, signal.SIGINT):
+                previous_handlers[signal_number] = signal.getsignal(signal_number)
+                signal.signal(signal_number, request_shutdown)
             self._capture_status = "STARTING"
             self._adapter.start()
             self._capture_status = "RUNNING"
@@ -366,8 +403,11 @@ class SensorAgent:
                 self.config.pid_path.unlink()
             except FileNotFoundError:
                 pass
+            for signal_number, previous in previous_handlers.items():
+                signal.signal(signal_number, previous)
             self._running = False
             self._capture_status = "STOPPED"
+            log_event(LOGGER, "agent stopped", event_type="agent_stopped", sensor_id=self.config.sensor_id)
 
     def stop(self) -> None:
         self._running = False
@@ -382,7 +422,9 @@ class SensorAgent:
             "agent_version": self.config.agent_version,
             "server_url": self.config.server_url,
             "agent_status": "ONLINE" if self._running else "STOPPED",
+            "process_status": "RUNNING" if self._running else "STOPPED",
             "capture_status": self._capture_status,
+            "connection_status": self._connection_status,
             "telemetry_status": "FRESH" if telemetry_age is not None and telemetry_age <= self.config.heartbeat_interval_seconds * 2 else ("STALE" if telemetry_age is not None else "UNKNOWN"),
             "last_heartbeat": self._last_heartbeat_at.isoformat() if self._last_heartbeat_at else None,
             "last_telemetry": self._last_telemetry_at.isoformat() if self._last_telemetry_at else None,

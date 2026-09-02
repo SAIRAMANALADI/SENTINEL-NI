@@ -37,6 +37,11 @@ Set SIH_AUTH_ENABLED=true and inject role tokens through the environment. Use
 Authorization: Bearer token. Do not put tokens in compose files, source, or
 logs.
 
+For production, set `SIH_ENV=production`, `SIH_AUTH_ENABLED=true`, and all
+viewer/operator/admin role tokens through a secret manager or protected
+environment. Production requires HTTPS with certificate verification; do not
+use `curl -k`, `verify=False`, or an equivalent bypass.
+
 ## Remote sensor deployment
 
 The central service accepts aggregated, versioned network states. A remote
@@ -65,6 +70,14 @@ stores unsent batches in a bounded disk buffer. It never forwards raw payloads.
 Use `python -m src.agent stop` for a best-effort local stop; use a service
 manager for production process supervision.
 
+Credential rotation is admin-only:
+
+    `Invoke-RestMethod -Method Post -Uri https://central-host/api/v1/sensors/<sensor-id>/rotate-credential -Headers @{ Authorization = "Bearer $env:SIH_ADMIN_TOKEN" }`
+
+Deliver the returned credential out of band, update the agent's protected
+credential store, and restart it. The old credential is invalid immediately;
+there is no automatic rotation or grace period.
+
 The agent observes traffic in parallel with the customer's application. It is
 not a reverse proxy and customer requests do not wait for telemetry delivery.
 Run `python -m src.agent status` to read the agent's local buffer and the
@@ -78,3 +91,19 @@ The central JSON registry persists sensor identity on the Compose volume, but
 remote L=10 runtime history remains process-local and must rebuild after a
 central restart. Docker Compose does not grant host packet-capture capability;
 the agent must run on the monitored host.
+
+### Multi-sensor runtime limits
+
+Central fleet summaries are available at `GET /api/v1/sensors`; full detail and
+forecast reads require an explicit sensor ID. Set `SIH_MAX_SENSOR_COUNT` to a
+positive bound appropriate for the deployment (default: `1024`). This bounds
+the in-process remote runtime registry; it is not a replacement for a shared
+multi-worker state store.
+
+The registry persists sensor identity, but remote state histories and forecasts
+are process-local. After a central restart, sensors must reconnect and supply
+ten contiguous valid states before their forecast becomes available again.
+Use the operator-only disable endpoint to revoke a sensor while retaining its
+identity and audit record. Do not expose the API directly to the public
+internet; terminate TLS and enforce the existing viewer/operator credentials
+at the deployment boundary.

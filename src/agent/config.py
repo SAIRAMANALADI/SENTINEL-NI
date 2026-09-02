@@ -1,4 +1,10 @@
-"""File-backed configuration for the Sentinel remote sensor agent."""
+"""File-backed configuration for the Sentinel remote sensor agent.
+
+The configuration file contains deployment settings only. The runtime token
+is kept in a sibling credential file with restrictive permissions where the
+operating system supports them. Legacy configurations with an inline token
+remain readable so upgrades do not orphan a sensor.
+"""
 
 from __future__ import annotations
 
@@ -13,19 +19,62 @@ from urllib.parse import urlsplit
 from src.agent import __version__
 
 
+def default_agent_dir() -> Path:
+    """Return an OS-appropriate, overridable agent application directory."""
+
+    override = os.getenv("SENTINEL_AGENT_HOME")
+    if override:
+        return Path(override).expanduser()
+    if os.name == "nt":
+        base = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        return base / "Sentinel" / "Agent"
+    if os.sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Sentinel" / "Agent"
+    base = Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    return base / "sentinel-agent"
+
+
 def default_config_path() -> Path:
-    return Path.home() / ".sentinel-agent" / "config.json"
+    return Path(os.getenv("SENTINEL_AGENT_CONFIG") or (default_agent_dir() / "config.json"))
+
+
+def _restrict_file(path: Path) -> None:
+    """Apply owner-only permissions where the platform exposes POSIX modes."""
+
+    try:
+        path.chmod(0o600)
+    except OSError:
+        # Windows ACLs are managed by the host administrator. The limitation is
+        # documented; silently claiming vault-grade storage would be worse.
+        pass
+
+
+def _atomic_json_save(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}-", delete=False
+    ) as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        temporary = Path(handle.name)
+    _restrict_file(temporary)
+    temporary.replace(path)
+    _restrict_file(path)
 
 
 @dataclass
 class AgentConfig:
-    server_url: str = "http://127.0.0.1:8000"
+    server_url: str = ""
     environment: str = "development"
     interface: str | None = None
     sensor_id: str | None = None
     runtime_token: str | None = field(default=None, repr=False)
     agent_version: str = __version__
-    buffer_dir: Path = field(default_factory=lambda: Path.home() / ".sentinel-agent" / "buffer")
+    protocol_version: str = "1"
+    telemetry_schema_version: str = "1"
+    capture_backend: str = "scapy"
+    capture_filter: str | None = None
+    buffer_dir: Path = field(default_factory=lambda: default_agent_dir() / "buffer")
     heartbeat_interval_seconds: int = 20
     batch_size: int = 6
     batch_interval_seconds: float = 5.0
@@ -35,49 +84,86 @@ class AgentConfig:
     retry_max_seconds: float = 60.0
     retry_jitter_seconds: float = 0.0
     buffer_overflow_policy: str = "DROP_OLDEST"
-    pid_path: Path = field(default_factory=lambda: Path.home() / ".sentinel-agent" / "agent.pid")
+    log_level: str = "INFO"
+    log_path: Path = field(default_factory=lambda: default_agent_dir() / "logs" / "agent.log")
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+    connection_timeout_seconds: float = 10.0
+    # TLS is explicit so the transport can evolve to mTLS without changing
+    # telemetry semantics.  Verification is enabled by default and may only
+    # be disabled for explicitly configured development endpoints.
+    tls_ca_path: Path | None = field(default=None, repr=False)
+    tls_client_cert_path: Path | None = field(default=None, repr=False)
+    tls_client_key_path: Path | None = field(default=None, repr=False)
+    tls_verify: bool = True
+    pid_path: Path = field(default_factory=lambda: default_agent_dir() / "agent.pid")
+    credentials_path: Path | None = field(default=None, repr=False)
     next_sequence: int = 1
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "AgentConfig":
-        config_path = Path(path or os.getenv("SENTINEL_AGENT_CONFIG") or default_config_path())
+        config_path = Path(path or default_config_path()).expanduser()
         if not config_path.is_file():
-            raise FileNotFoundError(f"agent configuration does not exist: {config_path}; run `python -m src.agent init`")
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
+            raise FileNotFoundError(
+                f"agent configuration does not exist: {config_path}; run `sentinel-agent init`"
+            )
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"agent configuration is not valid JSON: {config_path}") from exc
         if not isinstance(raw, dict):
             raise ValueError("agent configuration must be a JSON object")
         config = cls._from_dict(raw)
         config._config_path = config_path
+        credential_path = config.credentials_path or (config_path.parent / "credentials.json")
+        config.credentials_path = credential_path
+        if not config.runtime_token and credential_path.is_file():
+            try:
+                credentials = json.loads(credential_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"agent credential store is not valid JSON: {credential_path}") from exc
+            if not isinstance(credentials, dict) or not isinstance(credentials.get("runtime_token"), str):
+                raise ValueError(f"agent credential store is malformed: {credential_path}")
+            config.runtime_token = credentials["runtime_token"]
         return config
 
     @classmethod
     def _from_dict(cls, raw: dict[str, Any]) -> "AgentConfig":
         values = dict(raw)
-        for key in ("buffer_dir", "pid_path"):
+        for key in (
+            "buffer_dir", "pid_path", "log_path", "credentials_path",
+            "tls_ca_path", "tls_client_cert_path", "tls_client_key_path",
+        ):
             if key in values and values[key] is not None:
-                values[key] = Path(values[key])
+                values[key] = Path(values[key]).expanduser()
         return cls(**values)
 
     def save(self, path: str | Path | None = None) -> Path:
-        config_path = Path(path or getattr(self, "_config_path", None) or os.getenv("SENTINEL_AGENT_CONFIG") or default_config_path())
+        config_path = Path(
+            path or getattr(self, "_config_path", None) or default_config_path()
+        ).expanduser()
         self._config_path = config_path
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        credential_path = self.credentials_path or (config_path.parent / "credentials.json")
+        self.credentials_path = credential_path
+        if self.runtime_token:
+            _atomic_json_save(credential_path, {"runtime_token": self.runtime_token})
         payload = asdict(self)
-        payload["buffer_dir"] = str(self.buffer_dir)
-        payload["pid_path"] = str(self.pid_path)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=config_path.parent, prefix=".config-", delete=False) as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            temporary = Path(handle.name)
-        temporary.replace(config_path)
-        if os.name != "nt":
-            config_path.chmod(0o600)
+        for key in (
+            "buffer_dir", "pid_path", "log_path", "credentials_path",
+            "tls_ca_path", "tls_client_cert_path", "tls_client_key_path",
+        ):
+            if payload.get(key) is not None:
+                payload[key] = str(payload[key])
+        # Never put the credential in the ordinary configuration file.
+        payload["runtime_token"] = None
+        _atomic_json_save(config_path, payload)
         return config_path
 
     def redacted(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["buffer_dir"] = str(self.buffer_dir)
-        payload["pid_path"] = str(self.pid_path)
+        for key in ("buffer_dir", "pid_path", "log_path", "credentials_path"):
+            if payload.get(key) is not None:
+                payload[key] = str(payload[key])
         if payload.get("runtime_token"):
             payload["runtime_token"] = "<configured>"
         return payload
@@ -85,6 +171,8 @@ class AgentConfig:
     def validate(self, *, require_identity: bool = False) -> None:
         if self.environment not in {"development", "production"}:
             raise ValueError("environment must be development or production")
+        if not self.server_url:
+            raise ValueError("server_url is required; run `sentinel-agent init --server-url ...`")
         try:
             parsed = urlsplit(self.server_url)
             port = parsed.port
@@ -100,6 +188,8 @@ class AgentConfig:
             raise ValueError("server_url must not contain a query or fragment")
         if self.environment == "production" and parsed.scheme != "https":
             raise ValueError("production sensor transport requires an https:// server_url")
+        if self.capture_backend != "scapy":
+            raise ValueError("capture_backend must be scapy")
         if self.heartbeat_interval_seconds <= 0 or self.batch_size <= 0 or self.batch_interval_seconds <= 0:
             raise ValueError("heartbeat_interval_seconds, batch_size, and batch_interval_seconds must be positive")
         if self.max_buffer_batches <= 0 or self.max_buffer_bytes <= 0:
@@ -112,7 +202,40 @@ class AgentConfig:
             raise ValueError("retry_jitter_seconds must not be negative")
         if self.buffer_overflow_policy.upper() not in {"DROP_OLDEST", "REJECT_NEW"}:
             raise ValueError("buffer_overflow_policy must be DROP_OLDEST or REJECT_NEW")
+        if self.log_max_bytes <= 0 or self.log_backup_count < 0:
+            raise ValueError("log_max_bytes must be positive and log_backup_count must not be negative")
+        if self.connection_timeout_seconds <= 0:
+            raise ValueError("connection_timeout_seconds must be positive")
+        if not isinstance(self.tls_verify, bool):
+            raise ValueError("tls_verify must be a boolean")
+        parsed_scheme = urlsplit(self.server_url).scheme.lower()
+        tls_paths = {
+            "tls_ca_path": self.tls_ca_path,
+            "tls_client_cert_path": self.tls_client_cert_path,
+            "tls_client_key_path": self.tls_client_key_path,
+        }
+        if parsed_scheme != "https" and any(path is not None for path in tls_paths.values()):
+            raise ValueError("TLS certificate settings require an https:// server_url")
+        if self.tls_ca_path is not None and not self.tls_ca_path.is_file():
+            raise ValueError(f"tls_ca_path does not exist: {self.tls_ca_path}")
+        if (self.tls_client_cert_path is None) != (self.tls_client_key_path is None):
+            raise ValueError("tls_client_cert_path and tls_client_key_path must be configured together")
+        for name, path in tls_paths.items():
+            if path is not None and not path.is_file():
+                raise ValueError(f"{name} does not exist: {path}")
+        if self.environment == "production" and not self.tls_verify:
+            raise ValueError("production sensor transport requires TLS certificate verification")
         if isinstance(self.next_sequence, bool) or self.next_sequence < 1:
             raise ValueError("next_sequence must be positive")
         if require_identity and (not self.sensor_id or not self.runtime_token):
-            raise ValueError("agent is not registered; run `python -m src.agent register`")
+            raise ValueError("agent is not registered; run `sentinel-agent register`")
+
+    def ensure_writable_storage(self) -> None:
+        for directory in (self.buffer_dir, self.pid_path.parent, self.log_path.parent):
+            directory.mkdir(parents=True, exist_ok=True)
+            probe = directory / ".write-test"
+            try:
+                probe.write_text("ok", encoding="utf-8")
+                probe.unlink(missing_ok=True)
+            except OSError as exc:
+                raise OSError(f"agent storage is not writable: {directory}") from exc

@@ -1,0 +1,16 @@
+[Unit]
+Description=Sentinel remote network sensor agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m src.agent --config %h/.config/sentinel-agent/config.json start
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

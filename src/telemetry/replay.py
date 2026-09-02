@@ -7,9 +7,18 @@ from typing import Any
 
 from src.streaming.replay import iter_replay_events
 from src.telemetry.base import TelemetryAdapter
+from src.telemetry.contracts import REPLAY_CAPABILITIES, SourceType
 
 
 class ReplayTelemetryAdapter(TelemetryAdapter):
+    @property
+    def source_type(self) -> SourceType:
+        return SourceType.REPLAY
+
+    @property
+    def capabilities(self):
+        return REPLAY_CAPABILITIES
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._iterator = None
@@ -47,5 +56,9 @@ class ReplayTelemetryAdapter(TelemetryAdapter):
             "path": str(self.path),
             "read_count": self._read_count,
             "error": self._last_error,
+            "source_type": SourceType.REPLAY.value,
+            "source_status": "CONFIGURATION_ERROR" if not self.path.is_file() else REPLAY_CAPABILITIES.status.value,
+            "source_capabilities": REPLAY_CAPABILITIES.as_dict(),
+            "last_event": None,
+            "last_telemetry": None,
         }
-

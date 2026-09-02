@@ -13,6 +13,8 @@ import tempfile
 import uuid
 from typing import Any, Callable
 
+from src.telemetry.contracts import REMOTE_AGENT_CAPABILITIES, SourceType
+
 
 class SensorRegistryError(ValueError):
     """Base error for registry contract failures."""
@@ -36,6 +38,10 @@ class SensorSequenceConflict(SensorRegistryError):
 
 class SensorRateLimitExceeded(SensorRegistryError):
     """A sensor exceeded its bounded request rate."""
+
+
+class SensorDisabled(InvalidSensorCredentials):
+    """A registered sensor was explicitly disabled by an operator."""
 
 
 REGISTRY_SCHEMA_VERSION = 1
@@ -125,11 +131,18 @@ class SensorRegistry:
             sensor.setdefault("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"})
             sensor.setdefault("registration_state", "REGISTERED")
             sensor.setdefault("capture_status", "UNKNOWN")
+            sensor.setdefault("connection_status", "DISCONNECTED")
             sensor.setdefault("buffered_bytes", 0)
             sensor.setdefault("last_sent_sequence", 0)
             sensor.setdefault("last_acknowledged_sequence", sensor.get("last_sequence", 0))
             sensor.setdefault("last_state_timestamp", None)
             sensor.setdefault("last_error", None)
+            sensor.setdefault("disabled_at", None)
+            sensor.setdefault("disabled_reason", None)
+            sensor.setdefault("source_type", SourceType.REMOTE_AGENT.value)
+            sensor.setdefault("source_status", REMOTE_AGENT_CAPABILITIES.status.value)
+            sensor.setdefault("source_capabilities", REMOTE_AGENT_CAPABILITIES.as_dict())
+            sensor.setdefault("last_event", sensor.get("last_state_timestamp"))
         loaded["schema_version"] = REGISTRY_SCHEMA_VERSION
         return loaded
 
@@ -185,12 +198,41 @@ class SensorRegistry:
                 "last_sent_sequence": 0,
                 "last_acknowledged_sequence": 0,
                 "last_state_timestamp": None,
+                "source_type": SourceType.REMOTE_AGENT.value,
+                "source_status": REMOTE_AGENT_CAPABILITIES.status.value,
+                "source_capabilities": REMOTE_AGENT_CAPABILITIES.as_dict(),
+                "last_event": None,
                 "last_error": None,
+                "disabled_at": None,
+                "disabled_reason": None,
                 "credential_metadata": {"type": "sensor-runtime-token", "stored": "sha256"},
                 "runtime_token_hash": _hash_secret(runtime_token),
             }
             self._save()
         return {"sensor_id": sensor_id, "runtime_token": runtime_token, "registered_at": _iso(now) or ""}
+
+    def rotate(self, sensor_id: str) -> dict[str, str]:
+        """Issue one replacement runtime credential for an active sensor.
+
+        The old credential is invalid immediately.  The sensor identity and
+        all runtime history remain unchanged; operators must deliver the new
+        token through their existing secure channel and restart the agent.
+        """
+
+        with self._lock:
+            sensor = self._sensor(sensor_id)
+            if sensor.get("registration_state") == "DISABLED":
+                raise SensorDisabled("disabled sensors cannot rotate credentials")
+            runtime_token = f"snr_{secrets.token_urlsafe(32)}"
+            now = self._clock()
+            sensor["runtime_token_hash"] = _hash_secret(runtime_token)
+            sensor["credential_metadata"] = {
+                "type": "sensor-runtime-token",
+                "stored": "sha256",
+                "rotated_at": _iso(now),
+            }
+            self._save()
+            return {"sensor_id": sensor_id, "runtime_token": runtime_token, "rotated_at": _iso(now) or ""}
 
     def _purge_enrollments(self) -> None:
         now = self._clock()
@@ -212,6 +254,8 @@ class SensorRegistry:
             raise InvalidSensorCredentials("X-Sentinel-Sensor-Token is required")
         with self._lock:
             sensor = self._sensor(sensor_id)
+            if sensor.get("registration_state") == "DISABLED":
+                raise SensorDisabled("sensor credential is disabled")
             if not secrets.compare_digest(str(sensor["runtime_token_hash"]), _hash_secret(runtime_token)):
                 raise InvalidSensorCredentials("sensor credential is invalid")
             return dict(sensor)
@@ -238,7 +282,15 @@ class SensorRegistry:
             if len(history) >= self.rate_limit_per_minute:
                 raise SensorRateLimitExceeded("sensor request rate limit exceeded")
 
-    def accept_telemetry(self, sensor_id: str, *, sequence: int, batch_hash: str, buffered_item_count: int) -> str:
+    def accept_telemetry(
+        self,
+        sensor_id: str,
+        *,
+        sequence: int,
+        batch_hash: str,
+        buffered_item_count: int,
+        last_event: str | None = None,
+    ) -> str:
         with self._lock:
             sensor = self._sensor(sensor_id)
             self._check_rate(sensor_id)
@@ -255,6 +307,8 @@ class SensorRegistry:
             sensor["last_telemetry"] = _iso(now)
             sensor["last_telemetry_at"] = _iso(now)
             sensor["last_seen"] = _iso(now)
+            if last_event is not None:
+                sensor["last_event"] = last_event
             sensor["last_error"] = None
             self._save()
             return "accepted"
@@ -301,7 +355,10 @@ class SensorRegistry:
             sensor["buffered_item_count"] = buffered_item_count
             sensor["buffered_bytes"] = buffered_bytes
             sensor["capture_status"] = capture_status[:32]
+            sensor["connection_status"] = "CONNECTED"
             sensor["last_state_timestamp"] = last_state_timestamp
+            if last_state_timestamp is not None:
+                sensor["last_event"] = last_state_timestamp
             sensor["last_sent_sequence"] = max(int(sensor.get("last_sent_sequence", 0)), int(last_sent_sequence), 0)
             sensor["last_acknowledged_sequence"] = max(
                 int(sensor.get("last_acknowledged_sequence", sensor.get("last_sequence", 0))),
@@ -322,7 +379,9 @@ class SensorRegistry:
         last_seen = _parse(sensor.get("last_seen"))
         heartbeat_age = (now - heartbeat).total_seconds() if heartbeat else None
         telemetry_age = (now - telemetry).total_seconds() if telemetry else None
-        if last_seen is None:
+        if sensor.get("registration_state") == "DISABLED":
+            status = "OFFLINE"
+        elif last_seen is None:
             status = "REGISTERED"
         elif heartbeat_age is None or heartbeat_age > self.heartbeat_timeout_seconds:
             status = "OFFLINE"
@@ -337,6 +396,9 @@ class SensorRegistry:
             "created_at": sensor["created_at"],
             "registered_at": sensor.get("registered_at", sensor["created_at"]),
             "registration_state": sensor.get("registration_state", "REGISTERED"),
+            "disabled": sensor.get("registration_state") == "DISABLED",
+            "disabled_at": sensor.get("disabled_at"),
+            "disabled_reason": sensor.get("disabled_reason"),
             "last_seen": sensor.get("last_seen"),
             "last_heartbeat": sensor.get("last_heartbeat"),
             "last_telemetry": sensor.get("last_telemetry", sensor.get("last_telemetry_at")),
@@ -349,7 +411,12 @@ class SensorRegistry:
             "last_accepted_sequence": int(sensor.get("last_acknowledged_sequence", sensor.get("last_sequence", 0))),
             "last_sent_sequence": int(sensor.get("last_sent_sequence", 0)),
             "last_state_timestamp": sensor.get("last_state_timestamp"),
+            "source_type": sensor.get("source_type", SourceType.REMOTE_AGENT.value),
+            "source_status": sensor.get("source_status", REMOTE_AGENT_CAPABILITIES.status.value),
+            "source_capabilities": dict(sensor.get("source_capabilities", REMOTE_AGENT_CAPABILITIES.as_dict())),
+            "last_event": sensor.get("last_event", sensor.get("last_state_timestamp")),
             "capture_status": sensor.get("capture_status", "UNKNOWN"),
+            "connection_status": sensor.get("connection_status", "DISCONNECTED"),
             "agent_last_telemetry_at": sensor.get("agent_last_telemetry_at"),
             "agent_last_error": sensor.get("last_error"),
             "agent_status": "UNKNOWN" if heartbeat is None else ("ONLINE" if heartbeat_age is not None and heartbeat_age <= self.heartbeat_timeout_seconds else "OFFLINE"),
@@ -365,3 +432,12 @@ class SensorRegistry:
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
             return [self._public(sensor) for sensor in self._data["sensors"].values()]
+
+    def disable(self, sensor_id: str, *, reason: str | None = None) -> None:
+        """Revoke future sensor authentication without deleting its record."""
+        with self._lock:
+            sensor = self._sensor(sensor_id)
+            sensor["registration_state"] = "DISABLED"
+            sensor["disabled_at"] = _iso(self._clock())
+            sensor["disabled_reason"] = reason[:240] if reason else "disabled by operator"
+            self._save()

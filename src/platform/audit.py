@@ -28,6 +28,9 @@ class AuditLogger:
         sensor_id: str | None = None,
         sequence: int | None = None,
         result: str | None = None,
+        reason: str | None = None,
+        request_id: str | None = None,
+        source_ip: str | None = None,
     ) -> dict[str, Any]:
         record: dict[str, Any] = {
             "event_id": str(uuid.uuid4()),
@@ -48,6 +51,12 @@ class AuditLogger:
             record["sequence"] = int(sequence)
         if result is not None:
             record["result"] = str(result)
+        if reason is not None:
+            record["reason"] = str(reason)[:240]
+        if request_id is not None:
+            record["request_id"] = str(request_id)
+        if source_ip is not None:
+            record["source_ip"] = str(source_ip)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, allow_nan=False) + "\n")

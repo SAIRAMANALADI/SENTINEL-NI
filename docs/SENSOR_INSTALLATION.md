@@ -8,11 +8,12 @@ browser does not receive a global administrator token.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m src.agent init --server-url https://central.example --interface "Ethernet" --environment production
-python -m src.agent register --enrollment-token <one-time-token>
-python -m src.agent status
-python -m src.agent start
+python -m pip install .\dist\sih26_26153-0.1.0-py3-none-any.whl
+sentinel-agent init --server-url https://central.example --interface "Ethernet" --environment production
+sentinel-agent register --enrollment-token <one-time-token>
+sentinel-agent config validate
+sentinel-agent status
+sentinel-agent start
 ```
 
 An administrator creates the one-time enrollment credential through the
@@ -36,7 +37,7 @@ central URL. Production agent configuration fails closed unless the server URL
 uses `https://`; HTTP is never silently upgraded.
 
 Reliability settings are written into the agent configuration at initialization
-and can be reviewed with `python -m src.agent config`. The available controls
+and can be reviewed with `sentinel-agent config`. The available controls
 include batch size/interval, heartbeat interval, buffer batch/byte limits,
 `DROP_OLDEST` or `REJECT_NEW`, retry base/max delay, and optional retry jitter.
 Keep the buffer directory on durable local storage and restrict its filesystem

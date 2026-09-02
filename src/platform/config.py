@@ -52,6 +52,8 @@ class Settings:
     sensor_enrollment_ttl_seconds: int = 600
     sensor_heartbeat_timeout_seconds: int = 90
     sensor_rate_limit_per_minute: int = 60
+    registration_rate_limit_per_minute: int = 10
+    max_sensor_count: int = 1024
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -125,6 +127,8 @@ class Settings:
             sensor_enrollment_ttl_seconds=int(os.getenv("SIH_SENSOR_ENROLLMENT_TTL_SECONDS", "600")),
             sensor_heartbeat_timeout_seconds=int(os.getenv("SIH_SENSOR_HEARTBEAT_TIMEOUT_SECONDS", "90")),
             sensor_rate_limit_per_minute=int(os.getenv("SIH_SENSOR_RATE_LIMIT_PER_MINUTE", "60")),
+            registration_rate_limit_per_minute=int(os.getenv("SIH_REGISTRATION_RATE_LIMIT_PER_MINUTE", "10")),
+            max_sensor_count=int(os.getenv("SIH_MAX_SENSOR_COUNT", "1024")),
         )
 
     def validate(self) -> None:
@@ -145,6 +149,10 @@ class Settings:
             raise ValueError("sensor_heartbeat_timeout_seconds must be positive")
         if self.sensor_rate_limit_per_minute <= 0:
             raise ValueError("sensor_rate_limit_per_minute must be positive")
+        if self.registration_rate_limit_per_minute <= 0:
+            raise ValueError("registration_rate_limit_per_minute must be positive")
+        if self.max_sensor_count <= 0:
+            raise ValueError("max_sensor_count must be positive")
         if self.environment not in {"development", "test", "production"}:
             raise ValueError("environment must be development, test, or production")
         if self.environment == "production":

@@ -13,6 +13,22 @@ from src.sensors.registry import InvalidSensorCredentials, SensorNotFound, Senso
 SENSOR_TOKEN_HEADER = "X-Sentinel-Sensor-Token"
 
 
+def _sensor_security_event(request: Request, *, sensor_id: str, result: str, reason: str) -> None:
+    try:
+        request.app.state.runtime.audit.record(
+            event_type="sensor_authentication_failed",
+            model_version="security-v1",
+            policy_version="security-policy-v1",
+            sensor_id=sensor_id,
+            result=result,
+            reason=reason,
+            request_id=getattr(request.state, "request_id", None),
+            source_ip=request.client.host if request.client else None,
+        )
+    except Exception:
+        return
+
+
 def require_sensor(
     request: Request,
     sensor_id: str,
@@ -22,6 +38,7 @@ def require_sensor(
     try:
         return registry.authenticate(sensor_id, sensor_token)
     except (InvalidSensorCredentials, SensorNotFound) as exc:
+        _sensor_security_event(request, sensor_id=sensor_id, result="rejected", reason="invalid or inactive sensor credential")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "INVALID_SENSOR_CREDENTIAL", "message": "sensor authentication failed"},
@@ -39,6 +56,7 @@ def require_telemetry_sensor(
     try:
         return registry.authenticate(body.sensor_id, sensor_token)
     except (InvalidSensorCredentials, SensorNotFound) as exc:
+        _sensor_security_event(request, sensor_id=body.sensor_id, result="rejected", reason="invalid or inactive sensor credential")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "INVALID_SENSOR_CREDENTIAL", "message": "sensor authentication failed"},

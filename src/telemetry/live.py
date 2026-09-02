@@ -14,6 +14,7 @@ from collections import Counter
 from typing import Any, Callable
 
 from src.telemetry.base import TelemetryAdapter
+from src.telemetry.contracts import PACKET_CAPTURE_CAPABILITIES, SourceType
 
 
 LIVE_READY = "LIVE_READY"
@@ -163,11 +164,20 @@ def packet_to_event(packet: Any, *, scapy: Any | None = None) -> dict[str, Any]:
 class LiveTelemetryAdapter(TelemetryAdapter):
     """Explicitly started, bounded-queue live packet adapter."""
 
+    @property
+    def source_type(self) -> SourceType:
+        return SourceType.LOCAL_PACKET_CAPTURE
+
+    @property
+    def capabilities(self):
+        return PACKET_CAPTURE_CAPABILITIES
+
     def __init__(
         self,
         interface: str | None,
         *,
         stale_after_seconds: int = 30,
+        capture_filter: str | None = None,
         sniffer_factory: Callable[..., Any] | None = None,
         event_callback: Callable[[dict[str, Any]], bool | None] | None = None,
         queue_size: int = 10_000,
@@ -178,6 +188,7 @@ class LiveTelemetryAdapter(TelemetryAdapter):
             raise ValueError("queue_size must be positive")
         self.interface = interface.strip() if interface else ""
         self.stale_after_seconds = stale_after_seconds
+        self.capture_filter = capture_filter.strip() if capture_filter else None
         self._sniffer_factory = sniffer_factory
         self._event_callback = event_callback
         self._queue: Queue[dict[str, Any]] = Queue(maxsize=queue_size)
@@ -259,7 +270,10 @@ class LiveTelemetryAdapter(TelemetryAdapter):
                 factory = scapy.AsyncSniffer
             else:
                 factory = self._sniffer_factory
-            self._sniffer = factory(iface=self.interface, prn=self._on_packet, store=False)
+            options: dict[str, Any] = {"iface": self.interface, "prn": self._on_packet, "store": False}
+            if self.capture_filter:
+                options["filter"] = self.capture_filter
+            self._sniffer = factory(**options)
             self._sniffer.start()
         except PermissionError as exc:
             self._set_error(str(exc), LIVE_PERMISSION_DENIED)
@@ -323,4 +337,9 @@ class LiveTelemetryAdapter(TelemetryAdapter):
                 "parse_error_categories": dict(self._parse_error_categories),
                 "stale": stale,
                 "error": self._error,
+                "source_type": SourceType.LOCAL_PACKET_CAPTURE.value,
+                "source_status": "CONFIGURATION_ERROR" if self._state == LIVE_UNAVAILABLE else PACKET_CAPTURE_CAPABILITIES.status.value,
+                "source_capabilities": PACKET_CAPTURE_CAPABILITIES.as_dict(),
+                "last_event": self._last_event_at.isoformat() if self._last_event_at else None,
+                "last_telemetry": self._last_event_at.isoformat() if self._last_event_at else None,
             }

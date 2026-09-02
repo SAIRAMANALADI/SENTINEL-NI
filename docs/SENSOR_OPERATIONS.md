@@ -40,3 +40,32 @@ The central sensor status separates Agent, Telemetry, and Forecast. A fresh
 heartbeat with stale telemetry is `DEGRADED`; no fresh heartbeat is `OFFLINE`.
 `WAITING` forecast health means the sensor has not yet supplied ten contiguous
 valid states. See `SENSOR_RELIABILITY.md` for recovery and restart semantics.
+
+## Phase E fleet operations
+
+Use `GET /api/v1/sensors` for the compact fleet view. It reports measured
+sensor, online/degraded/offline, warning, and forecast-waiting counts without
+embedding histories or explanations. Select a sensor before opening its full
+detail or forecast view; these responses are always sensor-scoped.
+
+The read-only forecast endpoint is:
+
+```text
+GET /api/v1/sensors/{sensor_id}/forecast
+```
+
+It returns the existing computed forecast, or an explicit pending response
+until that sensor has enough contiguous state history. A GET never triggers
+inference. Operators can revoke a sensor without deleting its audit identity:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://central-host:8000/api/v1/sensors/{sensor_id}/disable `
+  -Headers @{ Authorization = "Bearer <operator-token>" }
+```
+
+The disabled sensor is retained as `OFFLINE` with lifecycle state `DISABLED`
+and cannot authenticate or submit telemetry. Other sensors continue using
+their own runtime histories. The central runtime is process-local: a central
+restart clears remote histories and forecasts, after which each sensor must
+reconnect and rebuild its ten-state history.

@@ -1,4 +1,6 @@
 -r requirements.txt
 
+build>=1.2,<2
+
 # Test-only dependency required by FastAPI/Starlette's TestClient.
 httpx==0.28.1

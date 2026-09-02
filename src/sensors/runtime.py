@@ -116,15 +116,20 @@ class RemoteSensorRuntime:
 class RemoteSensorRuntimeStore:
     """Map sensor IDs to isolated runtime stores."""
 
-    def __init__(self, *, inference_fn: InferenceFunction = predict_network_state_sequence) -> None:
+    def __init__(self, *, inference_fn: InferenceFunction = predict_network_state_sequence, max_sensors: int = 1024) -> None:
+        if max_sensors <= 0:
+            raise ValueError("max_sensors must be positive")
         self._runtimes: dict[str, RemoteSensorRuntime] = {}
         self._inference_fn = inference_fn
+        self.max_sensors = max_sensors
         self._lock = RLock()
 
     def _runtime(self, sensor_id: str) -> RemoteSensorRuntime:
         with self._lock:
             runtime = self._runtimes.get(sensor_id)
             if runtime is None:
+                if len(self._runtimes) >= self.max_sensors:
+                    raise ValueError("maximum remote sensor runtime count reached")
                 runtime = RemoteSensorRuntime(sensor_id, inference_fn=self._inference_fn)
                 self._runtimes[sensor_id] = runtime
             return runtime
