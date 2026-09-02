@@ -342,6 +342,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
             ) from exc
         sensor["runtime"] = runtime.remote_sensor_runtime.snapshot(sensor_id)
+        sensor["health"] = {
+            "agent": sensor.get("agent_status", "UNKNOWN"),
+            "telemetry": sensor.get("telemetry_status", "UNKNOWN"),
+            "forecast": "READY" if sensor["runtime"].get("forecast_status") == "FORECAST_READY" else "WAITING",
+        }
         return sensor
 
     @app.post("/api/v1/sensors/enrollment")
@@ -403,10 +408,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sensor: dict[str, Any] = Depends(require_sensor),
     ) -> dict[str, Any]:
         try:
-            runtime.sensor_registry.accept_heartbeat(
+            runtime.sensor_registry.accept_heartbeat_details(
                 sensor_id,
                 buffered_item_count=body.buffered_item_count,
+                buffered_bytes=body.buffered_bytes,
                 agent_version=body.agent_version,
+                capture_status=body.capture_status,
+                last_telemetry_at=body.last_telemetry_at,
+                last_state_timestamp=body.last_state_timestamp,
+                last_sent_sequence=body.last_sent_sequence,
+                last_acknowledged_sequence=body.last_acknowledged_sequence,
+                last_error=body.last_error,
             )
         except SensorRateLimitExceeded as exc:
             raise HTTPException(

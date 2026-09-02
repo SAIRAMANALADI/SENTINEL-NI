@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import deque
-import json
+from datetime import datetime, timezone
 import os
 from pathlib import Path
+import random
 import signal
 import time
 from typing import Any
@@ -21,6 +22,15 @@ from src.platform.logging import get_logger, log_event
 
 
 LOGGER = get_logger(__name__)
+TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _is_transient(error: TransportError) -> bool:
+    return error.status_code is None or error.status_code in TRANSIENT_HTTP_STATUSES
 
 
 class SensorClient:
@@ -40,14 +50,14 @@ class SensorClient:
         log_event(LOGGER, "sensor registration succeeded", event_type="registration_succeeded")
         return result
 
-    def heartbeat(self, buffered_item_count: int) -> dict[str, Any]:
+    def heartbeat(self, buffered_item_count: int, **metadata: Any) -> dict[str, Any]:
         self.config.validate(require_identity=True)
         result = request_json(
             self.config.server_url,
             f"/api/v1/sensors/{self.config.sensor_id}/heartbeat",
             method="POST",
             headers={"X-Sentinel-Sensor-Token": self.config.runtime_token or ""},
-            payload={"buffered_item_count": buffered_item_count, "agent_version": self.config.agent_version},
+            payload={"buffered_item_count": buffered_item_count, "agent_version": self.config.agent_version, **metadata},
         )
         log_event(
             LOGGER,
@@ -104,6 +114,7 @@ class SensorAgent:
             config.buffer_dir,
             max_batches=config.max_buffer_batches,
             max_bytes=config.max_buffer_bytes,
+            overflow_policy=config.buffer_overflow_policy,
         )
         self._pending: deque[dict[str, Any]] = deque(maxlen=max(config.batch_size * 4, config.batch_size))
         self._running = False
@@ -113,6 +124,15 @@ class SensorAgent:
         self._next_retry_at = 0.0
         self._retry_delay = config.retry_base_seconds
         self._pending_since: float | None = None
+        self._capture_status = "STOPPED"
+        self._last_heartbeat_at: datetime | None = None
+        self._last_telemetry_at: datetime | None = None
+        self._last_state_timestamp: str | None = None
+        self._last_sent_sequence = 0
+        self._last_acknowledged_sequence = 0
+        self._last_error: str | None = None
+        self._last_error_category: str | None = None
+        self._counters = {"states_collected": 0, "batches_sent": 0, "batches_buffered": 0, "retries": 0, "permanent_rejections": 0}
         self._batcher = TelemetryBatcher(
             config.sensor_id or "",
             sequence_start=config.next_sequence,
@@ -141,9 +161,12 @@ class SensorAgent:
             return "empty"
         payload = self._payload(states)
         try:
-            self.client.telemetry(payload)
+            response = self.client.telemetry(payload)
+            self._mark_delivery(payload, response)
+            self._counters["batches_sent"] += 1
             return "sent"
         except TransportError as exc:
+            self._remember_error(exc, "transport")
             log_event(
                 LOGGER,
                 "telemetry send failed",
@@ -152,7 +175,9 @@ class SensorAgent:
                 sequence=payload["sequence"],
                 status_code=exc.status_code,
             )
-            if exc.status_code is not None and exc.status_code not in {408, 425, 429, 500, 502, 503, 504}:
+            if not _is_transient(exc):
+                self.buffer.reject(payload, reason=str(exc), status_code=exc.status_code)
+                self._counters["permanent_rejections"] += 1
                 log_event(
                     LOGGER,
                     "telemetry rejected permanently",
@@ -181,6 +206,7 @@ class SensorAgent:
                 sequence=payload["sequence"],
                 status_code=exc.status_code,
             )
+            self._counters["batches_buffered"] += 1
             return "buffered"
 
     def flush_buffer(self) -> int:
@@ -192,9 +218,13 @@ class SensorAgent:
             if item is None:
                 return delivered
             try:
-                self.client.telemetry(item)
+                response = self.client.telemetry(item)
             except TransportError as exc:
-                if exc.status_code is not None and exc.status_code not in {408, 425, 429, 500, 502, 503, 504}:
+                self._remember_error(exc, "transport")
+                if not _is_transient(exc):
+                    self.buffer.reject(item, reason=str(exc), status_code=exc.status_code)
+                    self.buffer.pop(int(item["sequence"]))
+                    self._counters["permanent_rejections"] += 1
                     log_event(
                         LOGGER,
                         "buffered telemetry rejected permanently",
@@ -203,9 +233,12 @@ class SensorAgent:
                         sequence=item["sequence"],
                         status_code=exc.status_code,
                     )
-                    raise RuntimeError(f"central service rejected buffered telemetry: {exc}") from exc
-                self._next_retry_at = time.monotonic() + self._retry_delay
-                self._retry_delay = min(self._retry_delay * 2, 60.0)
+                    continue
+                scheduled_delay = min(self._retry_delay, self.config.retry_max_seconds)
+                jitter = random.uniform(0.0, self.config.retry_jitter_seconds) if self.config.retry_jitter_seconds else 0.0
+                self._next_retry_at = time.monotonic() + scheduled_delay + jitter
+                self._retry_delay = min(self._retry_delay * 2, self.config.retry_max_seconds)
+                self._counters["retries"] += 1
                 log_event(
                     LOGGER,
                     "buffered telemetry retry scheduled",
@@ -213,19 +246,59 @@ class SensorAgent:
                     sensor_id=self.config.sensor_id,
                     sequence=item["sequence"],
                     status_code=exc.status_code,
-                    retry_delay_seconds=self._retry_delay,
+                    retry_delay_seconds=scheduled_delay + jitter,
                 )
                 return delivered
             self.buffer.pop(int(item["sequence"]))
+            self._mark_delivery(item, response)
             self._retry_delay = self.config.retry_base_seconds
             self._next_retry_at = 0.0
             delivered += 1
+
+    def _mark_delivery(self, payload: dict[str, Any], response: dict[str, Any]) -> None:
+        now = _utc_now()
+        self._last_telemetry_at = now
+        self._last_sent_sequence = max(self._last_sent_sequence, int(payload["sequence"]))
+        if str(response.get("status", "")).upper() in {"ACCEPTED", "DUPLICATE_ACKNOWLEDGED"}:
+            self._last_acknowledged_sequence = max(self._last_acknowledged_sequence, int(payload["sequence"]))
+        self._last_error = None
+        self._last_error_category = None
+
+    def _remember_error(self, error: Exception, category: str) -> None:
+        self._last_error = str(error)[:240]
+        self._last_error_category = category
+
+    def _heartbeat(self) -> bool:
+        try:
+            self.client.heartbeat(
+                self.buffer.count,
+                buffered_bytes=self.buffer.size_bytes,
+                capture_status=self._capture_status,
+                last_telemetry_at=self._last_telemetry_at.isoformat() if self._last_telemetry_at else None,
+                last_state_timestamp=self._last_state_timestamp,
+                last_sent_sequence=self._last_sent_sequence,
+                last_acknowledged_sequence=self._last_acknowledged_sequence,
+                last_error=self._last_error,
+            )
+        except TransportError as exc:
+            self._remember_error(exc, "heartbeat_transport")
+            return False
+        except Exception as exc:
+            self._remember_error(exc, "heartbeat_error")
+            return False
+        self._last_heartbeat_at = _utc_now()
+        if self._last_error_category and self._last_error_category.startswith("heartbeat"):
+            self._last_error = None
+            self._last_error_category = None
+        return True
 
     def _on_state(self, state: dict[str, Any]) -> bool:
         if len(self._pending) >= self._pending.maxlen:
             # Keep loss explicit. The main loop will drain; the adapter records rejection.
             return False
         self._pending.append(state)
+        self._counters["states_collected"] += 1
+        self._last_state_timestamp = str(state.get("timestamp"))
         if self._pending_since is None:
             self._pending_since = time.monotonic()
         return True
@@ -241,7 +314,12 @@ class SensorAgent:
                 return
             count = min(self.config.batch_size, len(self._pending))
             states = [self._pending.popleft() for _ in range(count)]
-            self.submit_states(states)
+            try:
+                self.submit_states(states)
+            except Exception as exc:
+                # A permanent rejection is quarantined by submit_states. Keep
+                # the capture loop alive and expose the failure in status.
+                self._remember_error(exc, "telemetry_delivery_error")
             self._pending_since = time.monotonic() if self._pending else None
 
     def run(self) -> None:
@@ -255,37 +333,67 @@ class SensorAgent:
         )
         self._running = True
         try:
+            self._capture_status = "STARTING"
             self._adapter.start()
-            self.client.heartbeat(self.buffer.count)
+            self._capture_status = "RUNNING"
+            self._heartbeat()
             self._last_heartbeat = time.monotonic()
             while self._running:
                 self._drain_pending()
-                self.flush_buffer()
+                try:
+                    self.flush_buffer()
+                except Exception as exc:
+                    self._remember_error(exc, "flush_error")
                 now = time.monotonic()
                 if now - self._last_heartbeat >= self.config.heartbeat_interval_seconds:
-                    self.client.heartbeat(self.buffer.count)
+                    self._heartbeat()
                     self._last_heartbeat = now
                 time.sleep(0.25)
         except KeyboardInterrupt:
             pass
         finally:
+            self._capture_status = "STOPPING"
             if self._adapter is not None:
                 self._adapter.stop()
             if self._collector is not None:
                 self._collector.flush()
             self._drain_pending(force=True)
-            self.flush_buffer()
+            try:
+                self.flush_buffer()
+            except Exception as exc:
+                self._remember_error(exc, "shutdown_flush_error")
             try:
                 self.config.pid_path.unlink()
             except FileNotFoundError:
                 pass
             self._running = False
+            self._capture_status = "STOPPED"
 
     def stop(self) -> None:
         self._running = False
 
     def local_status(self) -> dict[str, Any]:
-        return {"config": self.config.redacted(), "buffered_batches": self.buffer.count, "buffered_bytes": self.buffer.size_bytes}
+        now = _utc_now()
+        heartbeat_age = (now - self._last_heartbeat_at).total_seconds() if self._last_heartbeat_at else None
+        telemetry_age = (now - self._last_telemetry_at).total_seconds() if self._last_telemetry_at else None
+        return {
+            "sensor_id": self.config.sensor_id or "unknown",
+            "hostname": hostname(),
+            "agent_version": self.config.agent_version,
+            "server_url": self.config.server_url,
+            "agent_status": "ONLINE" if self._running else "STOPPED",
+            "capture_status": self._capture_status,
+            "telemetry_status": "FRESH" if telemetry_age is not None and telemetry_age <= self.config.heartbeat_interval_seconds * 2 else ("STALE" if telemetry_age is not None else "UNKNOWN"),
+            "last_heartbeat": self._last_heartbeat_at.isoformat() if self._last_heartbeat_at else None,
+            "last_telemetry": self._last_telemetry_at.isoformat() if self._last_telemetry_at else None,
+            "last_state_timestamp": self._last_state_timestamp,
+            "last_sent_sequence": self._last_sent_sequence,
+            "last_acknowledged_sequence": self._last_acknowledged_sequence,
+            "last_error": self._last_error,
+            "buffer": self.buffer.status,
+            "counters": dict(self._counters),
+            "config": self.config.redacted(),
+        }
 
 
 def stop_pid(path: str | Path) -> bool:

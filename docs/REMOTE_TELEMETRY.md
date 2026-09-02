@@ -41,3 +41,17 @@ has expired.
 Remote aggregate state telemetry contains no source identity. Remote
 candidate-source attribution and source-based mitigation are therefore not
 fabricated; the API exposes that limitation explicitly.
+
+## Phase D operational hardening
+
+The local queue is bounded by both batch count and bytes. Its default
+`DROP_OLDEST` policy is explicit and counted; `REJECT_NEW` can be selected in
+the agent JSON configuration. Atomic files survive agent restart. Partial
+writes and malformed envelopes are quarantined, and permanent upload failures
+are recorded under `rejected/` instead of being retried indefinitely.
+
+Heartbeat carries safe operational metadata independently of telemetry. Central
+status exposes separate Agent, Telemetry, and Forecast health, including
+buffered bytes, capture status, timestamp provenance, sequence progress, and a
+bounded last-error diagnostic. See `SENSOR_RELIABILITY.md` for the complete
+policy.

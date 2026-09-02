@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -147,3 +148,49 @@ def test_two_remote_sensors_keep_forecast_histories_isolated(tmp_path: Path) -> 
     assert details_a["runtime"]["forecast_status"] == "FORECAST_READY"
     assert details_b["runtime"]["state_count"] == 1
     assert details_b["runtime"]["forecast_status"] == "BUILDING_HISTORY"
+
+
+def test_heartbeat_exposes_independent_agent_and_telemetry_health(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    response = client.post(
+        f"/api/v1/sensors/{sensor_id}/heartbeat",
+        json={
+            "buffered_item_count": 3, "buffered_bytes": 1200, "capture_status": "RUNNING",
+            "last_sent_sequence": 4, "last_acknowledged_sequence": 3,
+            "last_state_timestamp": "2018-02-22T01:00:00+00:00", "last_error": "temporary timeout",
+            "agent_version": "0.2.1",
+        },
+        headers={"X-Sentinel-Sensor-Token": token},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agent_status"] == "ONLINE"
+    assert body["telemetry_status"] == "UNKNOWN"
+    assert body["capture_status"] == "RUNNING"
+    assert body["buffered_item_count"] == 3
+    assert body["last_sent_sequence"] == 4
+    assert body["health"] == {"agent": "ONLINE", "telemetry": "UNKNOWN", "forecast": "WAITING"}
+
+
+def test_three_remote_sensors_keep_health_and_state_identity_under_concurrent_ingest(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    credentials = [_register(client) for _ in range(3)]
+
+    def send(item: tuple[str, str, int]) -> int:
+        sensor_id, token, marker = item
+        response = client.post(
+            "/api/v1/telemetry",
+            json={"schema_version": "1", "sensor_id": sensor_id, "sequence": 1,
+                  "sent_at": datetime.now(timezone.utc).isoformat(), "states": [_state(), {**_state("2018-02-22T01:00:10+00:00"), "features": {column: float(marker) for column in FEATURE_COLUMNS}}]},
+            headers={"X-Sentinel-Sensor-Token": token},
+        )
+        return response.status_code
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        assert list(pool.map(send, [(sensor_id, token, marker) for marker, (sensor_id, token) in enumerate(credentials, 1)])) == [200, 200, 200]
+
+    details = [client.get(f"/api/v1/sensors/{sensor_id}", headers={"Authorization": "Bearer viewer-test"}).json() for sensor_id, _ in credentials]
+    assert [item["runtime"]["state_count"] for item in details] == [2, 2, 2]
+    assert {item["sensor_id"] for item in details} == {sensor_id for sensor_id, _ in credentials}
+    assert all(item["runtime"]["sensor_id"] == item["sensor_id"] for item in details)

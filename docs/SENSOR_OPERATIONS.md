@@ -26,3 +26,17 @@ delivery time; state timestamps remain the ten-second network timeline. The
 agent retries network, timeout, rate-limit, and temporary-server failures with
 bounded backoff and retains them in the bounded disk buffer. Authentication,
 schema, timestamp, or sequence failures require operator action.
+
+## Reliability status
+
+`python -m src.agent status` reports the redacted server URL, sensor identity,
+agent/capture/telemetry status, state and delivery timestamps, buffer count and
+bytes, overflow counters, sequence progress, and the latest safe error. It
+never prints runtime tokens. `DROP_OLDEST` is visible in the buffer status and
+means the oldest unsent envelope was intentionally sacrificed at capacity;
+inspect capacity and connectivity before treating a run as lossless.
+
+The central sensor status separates Agent, Telemetry, and Forecast. A fresh
+heartbeat with stale telemetry is `DEGRADED`; no fresh heartbeat is `OFFLINE`.
+`WAITING` forecast health means the sensor has not yet supplied ten contiguous
+valid states. See `SENSOR_RELIABILITY.md` for recovery and restart semantics.

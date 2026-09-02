@@ -152,6 +152,15 @@ export interface SensorSummary {
   telemetry_freshness_seconds?: number | null;
   heartbeat_freshness_seconds?: number | null;
   buffered_item_count?: number;
+  buffered_bytes?: number;
   last_sequence?: number;
+  last_accepted_sequence?: number;
+  last_sent_sequence?: number;
+  last_state_timestamp?: string | null;
+  capture_status?: string;
+  agent_status?: string;
+  telemetry_status?: string;
+  agent_last_error?: string | null;
+  health?: { agent?: string; telemetry?: string; forecast?: string };
   runtime?: SensorRuntime;
 }

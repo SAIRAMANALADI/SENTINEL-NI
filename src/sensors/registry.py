@@ -124,6 +124,12 @@ class SensorRegistry:
             sensor.setdefault("last_telemetry", sensor.get("last_telemetry_at"))
             sensor.setdefault("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"})
             sensor.setdefault("registration_state", "REGISTERED")
+            sensor.setdefault("capture_status", "UNKNOWN")
+            sensor.setdefault("buffered_bytes", 0)
+            sensor.setdefault("last_sent_sequence", 0)
+            sensor.setdefault("last_acknowledged_sequence", sensor.get("last_sequence", 0))
+            sensor.setdefault("last_state_timestamp", None)
+            sensor.setdefault("last_error", None)
         loaded["schema_version"] = REGISTRY_SCHEMA_VERSION
         return loaded
 
@@ -174,6 +180,12 @@ class SensorRegistry:
                 "last_sequence": 0,
                 "last_batch_hash": None,
                 "buffered_item_count": 0,
+                "buffered_bytes": 0,
+                "capture_status": "UNKNOWN",
+                "last_sent_sequence": 0,
+                "last_acknowledged_sequence": 0,
+                "last_state_timestamp": None,
+                "last_error": None,
                 "credential_metadata": {"type": "sensor-runtime-token", "stored": "sha256"},
                 "runtime_token_hash": _hash_secret(runtime_token),
             }
@@ -237,11 +249,13 @@ class SensorRegistry:
                 raise SensorSequenceConflict("telemetry sequence is out of order or conflicts with an accepted batch")
             now = self._clock()
             sensor["last_sequence"] = sequence
+            sensor["last_acknowledged_sequence"] = sequence
             sensor["last_batch_hash"] = batch_hash
             sensor["buffered_item_count"] = buffered_item_count
             sensor["last_telemetry"] = _iso(now)
             sensor["last_telemetry_at"] = _iso(now)
             sensor["last_seen"] = _iso(now)
+            sensor["last_error"] = None
             self._save()
             return "accepted"
 
@@ -258,6 +272,26 @@ class SensorRegistry:
             return "accepted"
 
     def accept_heartbeat(self, sensor_id: str, *, buffered_item_count: int, agent_version: str | None = None) -> None:
+        self.accept_heartbeat_details(
+            sensor_id,
+            buffered_item_count=buffered_item_count,
+            agent_version=agent_version,
+        )
+
+    def accept_heartbeat_details(
+        self,
+        sensor_id: str,
+        *,
+        buffered_item_count: int,
+        buffered_bytes: int = 0,
+        agent_version: str | None = None,
+        capture_status: str = "UNKNOWN",
+        last_telemetry_at: datetime | None = None,
+        last_state_timestamp: str | None = None,
+        last_sent_sequence: int = 0,
+        last_acknowledged_sequence: int = 0,
+        last_error: str | None = None,
+    ) -> None:
         with self._lock:
             sensor = self._sensor(sensor_id)
             self._check_rate(sensor_id)
@@ -265,8 +299,20 @@ class SensorRegistry:
             sensor["last_heartbeat"] = _iso(now)
             sensor["last_seen"] = _iso(now)
             sensor["buffered_item_count"] = buffered_item_count
+            sensor["buffered_bytes"] = buffered_bytes
+            sensor["capture_status"] = capture_status[:32]
+            sensor["last_state_timestamp"] = last_state_timestamp
+            sensor["last_sent_sequence"] = max(int(sensor.get("last_sent_sequence", 0)), int(last_sent_sequence), 0)
+            sensor["last_acknowledged_sequence"] = max(
+                int(sensor.get("last_acknowledged_sequence", sensor.get("last_sequence", 0))),
+                int(last_acknowledged_sequence),
+                0,
+            )
+            sensor["last_error"] = last_error[:240] if last_error else None
             if agent_version:
                 sensor["agent_version"] = agent_version
+            if last_telemetry_at is not None:
+                sensor["agent_last_telemetry_at"] = _iso(last_telemetry_at)
             self._save()
 
     def _public(self, sensor: dict[str, Any]) -> dict[str, Any]:
@@ -278,7 +324,7 @@ class SensorRegistry:
         telemetry_age = (now - telemetry).total_seconds() if telemetry else None
         if last_seen is None:
             status = "REGISTERED"
-        elif (now - last_seen).total_seconds() > self.heartbeat_timeout_seconds:
+        elif heartbeat_age is None or heartbeat_age > self.heartbeat_timeout_seconds:
             status = "OFFLINE"
         elif heartbeat_age is not None and heartbeat_age <= self.heartbeat_timeout_seconds and telemetry_age is not None and telemetry_age <= self.telemetry_stale_after_seconds:
             status = "ONLINE"
@@ -298,7 +344,16 @@ class SensorRegistry:
             "telemetry_freshness_seconds": telemetry_age,
             "heartbeat_freshness_seconds": heartbeat_age,
             "buffered_item_count": int(sensor.get("buffered_item_count", 0)),
+            "buffered_bytes": int(sensor.get("buffered_bytes", 0)),
             "last_sequence": int(sensor.get("last_sequence", 0)),
+            "last_accepted_sequence": int(sensor.get("last_acknowledged_sequence", sensor.get("last_sequence", 0))),
+            "last_sent_sequence": int(sensor.get("last_sent_sequence", 0)),
+            "last_state_timestamp": sensor.get("last_state_timestamp"),
+            "capture_status": sensor.get("capture_status", "UNKNOWN"),
+            "agent_last_telemetry_at": sensor.get("agent_last_telemetry_at"),
+            "agent_last_error": sensor.get("last_error"),
+            "agent_status": "UNKNOWN" if heartbeat is None else ("ONLINE" if heartbeat_age is not None and heartbeat_age <= self.heartbeat_timeout_seconds else "OFFLINE"),
+            "telemetry_status": "UNKNOWN" if telemetry is None else ("FRESH" if telemetry_age is not None and telemetry_age <= self.telemetry_stale_after_seconds else "STALE"),
             "credential_metadata": dict(sensor.get("credential_metadata", {"type": "sensor-runtime-token", "stored": "sha256"})),
             "status": status,
         }

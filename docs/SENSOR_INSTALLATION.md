@@ -34,3 +34,10 @@ selected sensor's health and forecast.
 For local development only, `--environment development` permits an `http://`
 central URL. Production agent configuration fails closed unless the server URL
 uses `https://`; HTTP is never silently upgraded.
+
+Reliability settings are written into the agent configuration at initialization
+and can be reviewed with `python -m src.agent config`. The available controls
+include batch size/interval, heartbeat interval, buffer batch/byte limits,
+`DROP_OLDEST` or `REJECT_NEW`, retry base/max delay, and optional retry jitter.
+Keep the buffer directory on durable local storage and restrict its filesystem
+permissions. The queue is bounded at-least-once delivery, not exactly-once.

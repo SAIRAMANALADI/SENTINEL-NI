@@ -163,7 +163,21 @@ class SensorHeartbeatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     buffered_item_count: int = Field(default=0, ge=0, le=100_000)
+    buffered_bytes: int = Field(default=0, ge=0, le=1_000_000_000)
     agent_version: str | None = Field(default=None, min_length=1, max_length=64)
+    capture_status: str = Field(default="UNKNOWN", min_length=1, max_length=32)
+    last_telemetry_at: datetime | None = None
+    last_state_timestamp: str | None = Field(default=None, max_length=64)
+    last_sent_sequence: int = Field(default=0, ge=0)
+    last_acknowledged_sequence: int = Field(default=0, ge=0)
+    last_error: str | None = Field(default=None, max_length=240)
+
+    @field_validator("last_telemetry_at")
+    @classmethod
+    def telemetry_timestamp_must_be_timezone_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("last_telemetry_at must include a timezone")
+        return value
 
 
 class RemoteStatePoint(BaseModel):

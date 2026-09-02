@@ -71,3 +71,10 @@ Run `python -m src.agent status` to read the agent's local buffer and the
 authenticated sensor-scoped central status. Run the central API behind a TLS
 reverse proxy/private network; do not expose port 8000 directly to the public
 internet.
+
+Reliability operations are documented in `docs/SENSOR_RELIABILITY.md`. The
+central status intentionally reports Agent, Telemetry, and Forecast separately.
+The central JSON registry persists sensor identity on the Compose volume, but
+remote L=10 runtime history remains process-local and must rebuild after a
+central restart. Docker Compose does not grant host packet-capture capability;
+the agent must run on the monitored host.

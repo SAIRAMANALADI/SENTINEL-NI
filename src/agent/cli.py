@@ -32,6 +32,15 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--interface", required=True)
     init.add_argument("--buffer-dir")
     init.add_argument("--environment", choices=("development", "production"), default="development")
+    init.add_argument("--batch-size", type=int, default=6)
+    init.add_argument("--batch-interval", type=float, default=5.0)
+    init.add_argument("--max-buffer-batches", type=int, default=256)
+    init.add_argument("--max-buffer-bytes", type=int, default=64 * 1024 * 1024)
+    init.add_argument("--heartbeat-interval", type=int, default=20)
+    init.add_argument("--retry-base", type=float, default=1.0)
+    init.add_argument("--retry-max", type=float, default=60.0)
+    init.add_argument("--retry-jitter", type=float, default=0.0)
+    init.add_argument("--overflow-policy", choices=("DROP_OLDEST", "REJECT_NEW"), default="DROP_OLDEST")
 
     register = commands.add_parser("register", help="consume a one-time enrollment credential")
     register.add_argument("--enrollment-token", required=True)
@@ -46,7 +55,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     path = _config_path(args)
     if args.command == "init":
-        config = AgentConfig(server_url=args.server_url, interface=args.interface, environment=args.environment)
+        config = AgentConfig(
+            server_url=args.server_url, interface=args.interface, environment=args.environment,
+            batch_size=args.batch_size, batch_interval_seconds=args.batch_interval,
+            max_buffer_batches=args.max_buffer_batches, max_buffer_bytes=args.max_buffer_bytes,
+            heartbeat_interval_seconds=args.heartbeat_interval, retry_base_seconds=args.retry_base,
+            retry_max_seconds=args.retry_max, retry_jitter_seconds=args.retry_jitter,
+            buffer_overflow_policy=args.overflow_policy,
+        )
+        config.validate()
         if args.buffer_dir:
             config.buffer_dir = Path(args.buffer_dir).expanduser()
         print(config.save(path))

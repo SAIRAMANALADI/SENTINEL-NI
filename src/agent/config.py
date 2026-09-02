@@ -32,6 +32,9 @@ class AgentConfig:
     max_buffer_batches: int = 256
     max_buffer_bytes: int = 64 * 1024 * 1024
     retry_base_seconds: float = 1.0
+    retry_max_seconds: float = 60.0
+    retry_jitter_seconds: float = 0.0
+    buffer_overflow_policy: str = "DROP_OLDEST"
     pid_path: Path = field(default_factory=lambda: Path.home() / ".sentinel-agent" / "agent.pid")
     next_sequence: int = 1
 
@@ -103,6 +106,12 @@ class AgentConfig:
             raise ValueError("buffer limits must be positive")
         if self.retry_base_seconds <= 0:
             raise ValueError("retry_base_seconds must be positive")
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("retry_max_seconds must be greater than or equal to retry_base_seconds")
+        if self.retry_jitter_seconds < 0:
+            raise ValueError("retry_jitter_seconds must not be negative")
+        if self.buffer_overflow_policy.upper() not in {"DROP_OLDEST", "REJECT_NEW"}:
+            raise ValueError("buffer_overflow_policy must be DROP_OLDEST or REJECT_NEW")
         if isinstance(self.next_sequence, bool) or self.next_sequence < 1:
             raise ValueError("next_sequence must be positive")
         if require_identity and (not self.sensor_id or not self.runtime_token):

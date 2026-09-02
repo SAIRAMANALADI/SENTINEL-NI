@@ -111,3 +111,47 @@ def test_real_agent_posts_to_central_and_reaches_lstm(tmp_path: Path) -> None:
         server.should_exit = True
         thread.join(timeout=10)
         assert not thread.is_alive()
+
+
+def test_real_agent_buffers_during_network_outage_and_recovers(tmp_path: Path) -> None:
+    port = _free_port()
+    app = create_app(_settings(tmp_path))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert server.started is True
+        base_url = f"http://127.0.0.1:{port}"
+        enrollment = _json_request(
+            f"{base_url}/api/v1/sensors/enrollment", method="POST", payload={"expires_in_seconds": 600},
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        config_path = tmp_path / "agent.json"
+        config = AgentConfig(server_url=base_url, interface="test", buffer_dir=tmp_path / "buffer", pid_path=tmp_path / "agent.pid", batch_size=10)
+        config.save(config_path)
+        registered = SensorClient(config).register(str(enrollment["enrollment_token"]))
+        register_config(config, registered)
+        config.save(config_path)
+        agent = SensorAgent(AgentConfig.load(config_path))
+        start = datetime(2018, 2, 22, 3, 0, tzinfo=timezone.utc)
+        first = [_state(start + timedelta(seconds=10 * index)) for index in range(10)]
+        assert agent.submit_states(first) == "sent"
+
+        agent.config.server_url = "http://127.0.0.1:1"
+        assert agent.submit_states([_state(start + timedelta(seconds=100))]) == "buffered"
+        assert agent.buffer.count == 1
+
+        agent.config.server_url = base_url
+        assert agent.flush_buffer() == 1
+        assert agent.buffer.count == 0
+        status = SensorClient(agent.config).status()
+        assert status["last_accepted_sequence"] == 2
+        assert status["runtime"]["state_count"] == 11
+        assert status["runtime"]["forecast_status"] == "FORECAST_READY"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+        assert not thread.is_alive()

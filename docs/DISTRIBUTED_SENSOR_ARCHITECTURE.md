@@ -227,9 +227,29 @@ These are evidence-backed current limitations, not work performed in Phase A:
 - `configs/operating_policy.yaml`, including the balanced `0.19` threshold;
 - `src/features/` aggregation semantics unless a separately approved data-contract version is created;
 - local `mock`, `replay`, and existing local capture behavior in `src/telemetry/`, `src/api/live_runtime.py`, and their regression contracts;
-- `src/streaming/source_activity.py`, `src/streaming/source_forecast.py`, and `src/evaluation/mitigation_policy.py` semantics: no automatic blocking and no unsupported remote attribution.
+        - `src/streaming/source_activity.py`, `src/streaming/source_forecast.py`, and `src/evaluation/mitigation_policy.py` semantics: no automatic blocking and no unsupported remote attribution.
 
-## 12. Regression-sensitive tests
+## 12. Phase D reliability boundary
+
+Phase D hardening is limited to the agent delivery and sensor-status layers.
+`DiskTelemetryBuffer` is bounded, atomic, and restart-safe for local queued
+envelopes. Overflow is explicit (`DROP_OLDEST` or `REJECT_NEW`), corrupt and
+partial files are quarantined, and permanent API rejection is not retried
+forever. `SensorAgent` keeps collection running across transient transport and
+heartbeat failures and flushes in sequence after reconnect.
+
+Heartbeat metadata is independent from accepted telemetry. Central lifecycle
+evaluation uses heartbeat freshness for `OFFLINE`, and requires both fresh
+heartbeat and fresh telemetry for `ONLINE`; otherwise a communicating sensor
+is `DEGRADED`. The API and SensorFleet UI expose the three separate health
+planes: Agent, Telemetry, and Forecast.
+
+The detailed policy and known limitations are in
+[`SENSOR_RELIABILITY.md`](SENSOR_RELIABILITY.md) and the measured implementation
+record is in
+[`SENSOR_RELIABILITY_IMPLEMENTATION_REPORT.md`](SENSOR_RELIABILITY_IMPLEMENTATION_REPORT.md).
+
+## 13. Regression-sensitive tests
 
 Later phases must preserve and extend—not weaken—the following evidence:
 
@@ -245,7 +265,7 @@ Later phases must preserve and extend—not weaken—the following evidence:
 | frozen inference/schema/policy/target behavior | `tests/test_inference.py`, `tests/test_input_validation.py`, `tests/test_policy_integration.py`, `tests/test_k1_consistency.py` |
 | local API/dashboard contract and source/mitigation safety | `tests/api/test_api_contracts.py`, `tests/test_live_api.py`, `tests/test_live_dashboard_contract.py`, `tests/test_source_prioritization.py`, `tests/test_mitigation_policy.py` |
 
-## 13. Recommended implementation order after Phase A
+## 14. Recommended implementation order after Phase A
 
 1. **Phase B — control-plane hardening:** choose a durable registry strategy, secure the dashboard administrative enrollment flow, and resolve the authenticated agent-status mismatch. Add focused regression tests first.
 2. **Phase C — central ingestion resilience:** make runtime/registry restart behavior explicit, add sensor-scoped audit/metrics, and define safe multi-process limitations or a supported shared-state design.
@@ -253,6 +273,6 @@ Later phases must preserve and extend—not weaken—the following evidence:
 4. **Phase E — deployment validation:** validate TLS reverse proxy, registry persistence across Compose recreation, and a real two-host capture/telemetry soak using supported interfaces.
 5. **Phase F — optional remote source enrichment research:** begin only after a separate approved source-identity/privacy contract. It must not alter the frozen 17-feature LSTM input or fabricate candidate sources.
 
-## 14. Phase A conclusion
+## 15. Phase A conclusion
 
 The correct remote integration point already exists: host-local agent aggregation followed by authenticated state ingestion into an isolated `RemoteSensorRuntimeStore`. The system supports sensor registration, heartbeat, buffering, per-sensor sequences, and forecast isolation while preserving local, replay, and mock behavior. Production readiness is blocked only by the operational/control-plane limitations listed above; no data-pipeline or ML redesign is required for Phase A.
