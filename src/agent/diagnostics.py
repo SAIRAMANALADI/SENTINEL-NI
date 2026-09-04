@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,24 @@ from typing import Any
 from src.agent import __version__
 from src.agent.config import AgentConfig
 from src.telemetry.live import LiveTelemetryError, discover_capture_interfaces
+
+
+_SENSITIVE_KEYS = {"token", "runtime_token", "enrollment_token", "authorization", "password", "secret"}
+
+
+def _redact(value: Any, *, runtime_token: str | None = None, key: str = "") -> Any:
+    """Recursively remove credential-shaped values from diagnostic output."""
+
+    if key.lower() in _SENSITIVE_KEYS:
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {name: _redact(item, runtime_token=runtime_token, key=str(name)) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_redact(item, runtime_token=runtime_token) for item in value]
+    if isinstance(value, str):
+        result = value.replace(runtime_token, "<redacted>") if runtime_token else value
+        return re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1<redacted>", result)
+    return value
 
 
 def collect(config: AgentConfig, *, check_connection: bool = True) -> dict[str, Any]:
@@ -62,9 +81,15 @@ def collect(config: AgentConfig, *, check_connection: bool = True) -> dict[str, 
         try:
             from src.agent.client import SensorClient
 
-            result["connection"] = {"status": "CONNECTED", "central": SensorClient(config).status()}
+            result["connection"] = {
+                "status": "CONNECTED",
+                "central": _redact(SensorClient(config).status(), runtime_token=config.runtime_token),
+            }
         except Exception as exc:
-            result["connection"] = {"status": "UNREACHABLE", "error": str(exc)[:240]}
+            result["connection"] = {
+                "status": "UNREACHABLE",
+                "error": _redact(str(exc), runtime_token=config.runtime_token)[:240],
+            }
     else:
         result["connection"] = {"status": "NOT_CHECKED"}
     return result

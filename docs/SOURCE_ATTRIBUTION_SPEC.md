@@ -2,7 +2,7 @@
 
 ## Status
 
-This is a **prototype input-adapter contract** for deterministic replay and future live packet/event streams. It has not been validated against the CSE-CIC-IDS2018 PCAP archive because the authoritative PCAP-to-flow mapping remains unverified.
+This is a **prototype input-adapter contract** for deterministic replay and future live packet/event streams. It has not been validated against the CSE-CIC-IDS2018 PCAP archive because the authoritative PCAP-to-flow mapping remains unverified. The optional authenticated remote source-activity envelope added in Phase N is documented in `docs/SOURCE_TELEMETRY.md`.
 
 ## Identity
 

@@ -36,8 +36,11 @@ Remote agents send the version-1 state-only envelope documented in
 with `X-Sentinel-Sensor-Token`. The body sensor ID must match the credential.
 Accepted batches are routed to the isolated sensor runtime; duplicate
 sequence/hash pairs are acknowledged without running inference again.
-Malformed, non-finite, timezone-naive, cross-day, non-contiguous, oversized,
-rate-limited, or out-of-order telemetry is rejected.
+Malformed, non-finite, timezone-naive, cross-day, within-batch non-contiguous,
+oversized, rate-limited, or out-of-order telemetry is rejected. A timestamp
+gap between separately accepted batches is not interpolated: the remote
+sensor runtime accepts the new state as a fresh run, resets its L=10 history,
+and waits for ten new contiguous states.
 
 ## GET /ready
 

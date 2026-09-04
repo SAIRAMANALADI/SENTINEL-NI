@@ -4,7 +4,11 @@
 
     python -m venv .venv
     .\.venv\Scripts\Activate.ps1
-    pip install -r requirements.txt
+    pip install -r requirements.lock.txt
+
+`requirements.lock.txt` is the reproducible release path. The compatible-range
+`requirements.txt` file remains available for development and platform-specific
+dependency resolution.
 
 ## Start backend
 
@@ -42,6 +46,15 @@ viewer/operator/admin role tokens through a secret manager or protected
 environment. Production requires HTTPS with certificate verification; do not
 use `curl -k`, `verify=False`, or an equivalent bypass.
 
+Set `SIH_TRANSPORT_MODE=direct_https` when the application itself is the
+secure listener. When TLS terminates at a private reverse proxy, set
+`SIH_TRANSPORT_MODE=trusted_proxy` and configure
+`SIH_TRUSTED_PROXY_CIDRS` to the proxy's exact source IP/CIDR. The API rejects
+direct HTTP and ignores forged forwarded-protocol headers from untrusted
+peers. It returns `403 HTTPS_REQUIRED` rather than redirecting authenticated
+API or telemetry requests. Only loopback health/readiness probes may use
+internal HTTP.
+
 ## Remote sensor deployment
 
 The central service accepts aggregated, versioned network states. A remote
@@ -54,11 +67,11 @@ central service to capture the remote interface.
 
     `$headers = @{ Authorization = "Bearer $env:SIH_ADMIN_TOKEN" }`
     `$body = @{ expires_in_seconds = 600 } | ConvertTo-Json`
-    `Invoke-RestMethod -Method Post -Uri http://central-host:8000/api/v1/sensors/enrollment -Headers $headers -Body $body -ContentType application/json`
+    `Invoke-RestMethod -Method Post -Uri https://sentinel.example.internal/api/v1/sensors/enrollment -Headers $headers -Body $body -ContentType application/json`
 
 3. On the connected server, install the package and initialize the agent:
 
-    `python -m src.agent init --server-url https://central-host --interface "Ethernet" --environment production`
+    `python -m src.agent init --server-url https://sentinel.example.internal --interface "Ethernet" --environment production`
     `python -m src.agent register --enrollment-token <one-time-token>`
     `python -m src.agent start`
 
@@ -87,14 +100,19 @@ internet.
 
 Reliability operations are documented in `docs/SENSOR_RELIABILITY.md`. The
 central status intentionally reports Agent, Telemetry, and Forecast separately.
-The central JSON registry persists sensor identity on the Compose volume, but
+The central JSON registry persists sensor identity on the Compose host-backed
+registry mount, but
 remote L=10 runtime history remains process-local and must rebuild after a
 central restart. Docker Compose does not grant host packet-capture capability;
 the agent must run on the monitored host.
 
-## Phase I validation boundary
+## Historical Phase I validation boundary
 
-The repository's deployment validation is currently **development-only**:
+The following section records the older Phase I boundary and is retained for
+historical traceability. It is superseded for the current candidate by
+[`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).
+
+At Phase I, the repository's deployment validation was **development-only**:
 
 - **Tested:** local Python/package installation, automated agent-to-central
   delivery, sensor isolation, buffering/retry contracts, security checks,
@@ -105,9 +123,9 @@ The repository's deployment validation is currently **development-only**:
 - **Planned:** staging certificate/DNS validation, physical multi-host soak,
   measured outage recovery, and production-capacity assessment.
 
-Do not claim Docker runtime or staging TLS support from Compose configuration
-alone. Run the checks in [DEPLOYMENT_TEST_MATRIX.md](DEPLOYMENT_TEST_MATRIX.md)
-and record evidence in [PHASE_I_DEPLOYMENT_VALIDATION_REPORT.md](PHASE_I_DEPLOYMENT_VALIDATION_REPORT.md).
+The historical warning remains valid for staging claims: do not infer public
+staging support from Compose configuration alone. Current local runtime and
+isolated TLS evidence is recorded in the Phase T report.
 
 ### Multi-sensor runtime limits
 
@@ -124,3 +142,33 @@ Use the operator-only disable endpoint to revoke a sensor while retaining its
 identity and audit record. Do not expose the API directly to the public
 internet; terminate TLS and enforce the existing viewer/operator credentials
 at the deployment boundary.
+
+## Phase Q validation record
+
+Local Compose, a real Nginx TLS proxy, an actual agent, live Wi-Fi capture,
+central outage buffering/recovery, and independent customer-path behavior were
+validated on 2026-09-04. Physical multi-host, five-sensor, L=10 forecast
+readiness, expired-certificate behavior, and 30-minute soak remain
+**NOT VERIFIED**. This record does not qualify a local run as staging.
+
+## Phase R remote forecast record
+
+The 2026-09-04 real-agent run validated HTTPS registration, heartbeat, live
+Wi-Fi/Npcap capture, telemetry delivery, central outage buffering/retry/flush,
+agent OFFLINE/STALE transitions, same-identity restart, and customer-path
+isolation. The central API rejected duplicate or gapped 10-second timestamps,
+and the sensor ended below the required contiguous `L=10` history. A live
+`K=5` LSTM forecast and forecast-ready dashboard were therefore **NOT VERIFIED**.
+
+Do not treat the local Compose/TLS exercise as staging. Physical multi-host and
+five-sensor behavior, expired-certificate handling, a 30-minute soak, and live
+capacity remain unverified. See
+[`PHASE_R_REMOTE_FORECAST_REPORT.md`](PHASE_R_REMOTE_FORECAST_REPORT.md).
+
+## Phase T current release-candidate record
+
+The current candidate also validates local Compose health/restart/down-up,
+browser smoke, clean wheel installation, release-audit links, and the real
+Windows remote path reaching contiguous `L=10` and existing `K=5` inference.
+The complete evidence and remaining unverified gates are in
+[`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).

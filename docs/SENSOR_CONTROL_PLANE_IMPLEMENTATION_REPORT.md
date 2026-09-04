@@ -69,12 +69,10 @@ The registry location is configurable and defaults to:
 results/sensors/registry.json
 ```
 
-Docker Compose now mounts `/app/results/sensors` to the named volume
-`sentinel_registry`. The volume name is configurable with
-`SENTINEL_REGISTRY_VOLUME` and is not removed by ordinary `docker compose down`
-(`down --volumes` intentionally removes it). The registry file is written via
-an atomic temporary-file replacement. Cross-process/HA registry behavior is
-not claimed.
+Docker Compose mounts `/app/results/sensors` to the persistent host-backed
+`./results/sensors` directory. Keep that directory private and backed up. The
+registry file is written via an atomic temporary-file replacement.
+Cross-process/HA registry behavior is not claimed.
 
 ## 6. HTTPS and server URL behavior
 

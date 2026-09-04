@@ -167,3 +167,24 @@ def test_oversized_request_is_rejected_before_endpoint_processing(tmp_path: Path
     )
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+
+
+def test_chunked_oversized_request_is_rejected_while_reading(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    response = client.post(
+        "/api/v1/telemetry",
+        content=(chunk for chunk in (b"a" * 1_000_000, b"b" * 1_000_001)),
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+
+
+def test_secret_validation_values_are_not_reflected(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    response = client.post(
+        "/api/v1/sensors/register",
+        json={"enrollment_token": "short", "hostname": "edge-a", "agent_version": "0.2.0"},
+    )
+    assert response.status_code == 422
+    assert '"input"' not in response.text
+    assert "invalid secret value" in response.text

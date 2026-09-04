@@ -12,6 +12,7 @@ from src.agent.buffer import BufferFullError, DiskTelemetryBuffer
 from src.agent.collector import AgentCollector
 from src.agent.config import AgentConfig
 from src.agent.client import SensorAgent
+from src.agent.identity import register_config
 from src.agent.telemetry import TelemetryBatcher
 from src.agent.transport import TransportError
 from src.features.network_state import FEATURE_COLUMNS
@@ -90,6 +91,48 @@ def test_telemetry_batcher_assigns_bounded_monotonic_envelopes() -> None:
     assert first["sent_at"] == "2026-09-02T12:00:00+00:00"
     assert len(first["states"]) == 2
     assert batcher.next_sequence == 9
+
+
+def test_telemetry_batcher_nests_live_flat_features_for_remote_contract() -> None:
+    batcher = TelemetryBatcher("sensor-0123456789abcdef", batch_size=1)
+    flat_state = {
+        "timestamp": "2018-02-22T01:00:00+00:00",
+        "capture_day": "2018-02-22",
+        **{column: float(index) for index, column in enumerate(FEATURE_COLUMNS)},
+    }
+
+    payload = batcher.build([flat_state])
+
+    assert payload["states"][0]["features"] == {
+        column: float(index) for index, column in enumerate(FEATURE_COLUMNS)
+    }
+    assert all(column not in payload["states"][0] for column in FEATURE_COLUMNS)
+
+
+def test_telemetry_batcher_can_carry_optional_source_activity_without_state_mixing() -> None:
+    batcher = TelemetryBatcher("sensor-0123456789abcdef", batch_size=2)
+    source = {
+        "source_ip": "10.0.0.1",
+        "capture_day": "2018-02-22",
+        "interval_start": "2018-02-22T01:00:00+00:00",
+        "interval_end": "2018-02-22T01:00:10+00:00",
+        "flow_count": 1,
+        "packet_count": 2,
+        "byte_count": 200.0,
+        "unique_destinations": 1,
+        "unique_destination_ports": 1,
+        "mean_packet_size": 100.0,
+        "mean_iat": 1.0,
+        "syn_count": 1,
+        "ack_count": 1,
+        "rst_count": 0,
+        "packet_rate": 0.2,
+        "byte_rate": 20.0,
+    }
+    payload = batcher.build([_state(0)], [source])
+    assert payload["source_schema_version"] == "1"
+    assert payload["source_activity"] == [source]
+    assert payload["states"][0]["features"] == _state(0)["features"]
 
 
 def test_telemetry_batcher_collects_and_flushes_without_unbounded_memory() -> None:
@@ -220,3 +263,63 @@ def test_heartbeat_failure_is_visible_without_stopping_collection(tmp_path: Path
     assert agent._heartbeat() is False
     assert agent.local_status()["last_error"] == "central unavailable"
     assert agent.local_status()["agent_status"] == "STOPPED"
+
+
+def test_registration_response_is_validated_before_config_mutation(tmp_path: Path) -> None:
+    config = AgentConfig(
+        server_url="https://central.example",
+        interface="test",
+        buffer_dir=tmp_path / "buffer",
+        pid_path=tmp_path / "agent.pid",
+    )
+    with pytest.raises(ValueError, match="invalid sensor_id"):
+        register_config(config, {"sensor_id": "not-a-sensor", "runtime_token": "secret"})
+    assert config.sensor_id is None
+    assert config.runtime_token is None
+
+
+def test_agent_does_not_send_newer_sequences_ahead_of_buffered_batches(tmp_path: Path) -> None:
+    config = AgentConfig(
+        server_url="http://127.0.0.1:8000",
+        sensor_id="sensor-0123456789abcdef",
+        runtime_token="snr_test",
+        interface="test",
+        buffer_dir=tmp_path / "buffer",
+        pid_path=tmp_path / "agent.pid",
+    )
+    agent = SensorAgent(config)
+    calls: list[int] = []
+
+    def fail_once(payload: dict[str, object]) -> dict[str, object]:
+        calls.append(int(payload["sequence"]))
+        if len(calls) == 1:
+            raise TransportError("temporarily unavailable")
+        return {"status": "ACCEPTED"}
+
+    agent.client.telemetry = fail_once  # type: ignore[method-assign]
+    assert agent.submit_states([_state(0)]) == "buffered"
+    assert agent.submit_states([_state(1)]) == "buffered"
+    assert calls == [1]
+    assert agent.flush_buffer() == 2
+    assert calls == [1, 1, 2]
+
+
+def test_pending_state_is_restored_when_buffer_rejects_new_batch(tmp_path: Path) -> None:
+    config = AgentConfig(
+        server_url="http://127.0.0.1:8000",
+        sensor_id="sensor-0123456789abcdef",
+        runtime_token="snr_test",
+        interface="test",
+        buffer_dir=tmp_path / "buffer",
+        pid_path=tmp_path / "agent.pid",
+        max_buffer_batches=1,
+        buffer_overflow_policy="REJECT_NEW",
+    )
+    agent = SensorAgent(config)
+    agent.client.telemetry = lambda _payload: (_ for _ in ()).throw(TransportError("offline"))  # type: ignore[method-assign]
+    assert agent.submit_states([_state(0)]) == "buffered"
+    agent._pending.append(_state(1))
+    agent._pending_since = 0.0
+    agent._drain_pending(force=True)
+    assert len(agent._pending) == 1
+    assert agent.buffer.count == 1

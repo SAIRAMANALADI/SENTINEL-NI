@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+from src.features.network_state import FEATURE_COLUMNS
+
 
 SENSOR_ID_PATTERN = re.compile(r"^sensor-[a-f0-9]{16}$")
 MAX_BATCH_STATES = 60
+MAX_SOURCE_ACTIVITY_ROWS = 120
 
 
 def _utc_now() -> datetime:
@@ -76,8 +79,16 @@ class TelemetryBatcher:
         self._pending.clear()
         return self.build(states)
 
-    def build(self, states: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-        """Build one payload without altering state order or feature values."""
+    def build(
+        self,
+        states: Sequence[Mapping[str, Any]],
+        source_activity: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Build one payload without altering state or source values.
+
+        Source activity is optional and rides the same authenticated envelope
+        as states. It is intentionally not folded into the state feature map.
+        """
 
         if not states:
             raise ValueError("telemetry batch must contain at least one state")
@@ -85,7 +96,20 @@ class TelemetryBatcher:
             raise ValueError("telemetry batch exceeds the configured batch size")
         if any(not isinstance(state, Mapping) for state in states):
             raise ValueError("telemetry states must be mappings")
-        copied_states = [dict(state) for state in states]
+        source_rows = list(source_activity or [])
+        if len(source_rows) > MAX_SOURCE_ACTIVITY_ROWS:
+            raise ValueError("telemetry source activity exceeds the configured batch limit")
+        if any(not isinstance(row, Mapping) for row in source_rows):
+            raise ValueError("telemetry source activity rows must be mappings")
+        copied_states = []
+        for state in states:
+            copied = dict(state)
+            # Live collection produces the frozen feature columns alongside
+            # timestamp metadata. The remote API envelope keeps those same
+            # values under its explicit ``features`` field.
+            if "features" not in copied and all(column in copied for column in FEATURE_COLUMNS):
+                copied["features"] = {column: copied.pop(column) for column in FEATURE_COLUMNS}
+            copied_states.append(copied)
         sent_at = self._clock()
         if sent_at.tzinfo is None or sent_at.utcoffset() is None:
             raise ValueError("telemetry clock must return a timezone-aware datetime")
@@ -97,6 +121,9 @@ class TelemetryBatcher:
             "sent_at": sent_at.astimezone(timezone.utc).isoformat(),
             "states": copied_states,
         }
+        if source_rows:
+            payload["source_schema_version"] = "1"
+            payload["source_activity"] = [dict(row) for row in source_rows]
         self._next_sequence += 1
         if self._on_sequence_advanced is not None:
             self._on_sequence_advanced(self._next_sequence)

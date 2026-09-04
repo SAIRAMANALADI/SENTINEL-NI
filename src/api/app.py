@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
+from ipaddress import ip_address, ip_network
 import json
 import time
 import uuid
@@ -32,9 +33,13 @@ from src.api.models import (
     SourcePriorityRequest,
     SourcePriorityResponse,
     RemoteTelemetryBatch,
+    SensorForecastResponse,
+    SensorHealthResponse,
     SensorEnrollmentRequest,
     SensorHeartbeatRequest,
+    SensorMitigationResponse,
     SensorRegisterRequest,
+    SensorSourcesResponse,
 )
 from src.api.services import forecast_payload, mitigation_payload, source_priority_payload
 from src.evaluation.operating_policy import load_policy
@@ -86,7 +91,10 @@ class Runtime:
             telemetry_stale_after_seconds=settings.telemetry_stale_after_seconds,
             rate_limit_per_minute=settings.sensor_rate_limit_per_minute,
         )
-        self.remote_sensor_runtime = RemoteSensorRuntimeStore(max_sensors=settings.max_sensor_count)
+        self.remote_sensor_runtime = RemoteSensorRuntimeStore(
+            max_sensors=settings.max_sensor_count,
+            source_stale_after_seconds=settings.telemetry_stale_after_seconds,
+        )
         self.sensor_manager = SensorManager(self.sensor_registry, self.remote_sensor_runtime)
         self.registration_limiter = SlidingWindowRateLimiter(settings.registration_rate_limit_per_minute)
 
@@ -241,6 +249,62 @@ def _error_payload(code: str, message: str, request: Request, **details: Any) ->
     }
 
 
+_SECRET_VALIDATION_FIELDS = frozenset({"token", "enrollment_token", "runtime_token", "password", "secret"})
+
+
+def _safe_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep secret values out of validation responses and downstream logs."""
+
+    safe: list[dict[str, Any]] = []
+    for error in errors:
+        item = dict(error)
+        location = item.get("loc", ())
+        if any(str(part).lower() in _SECRET_VALIDATION_FIELDS for part in location):
+            item.pop("input", None)
+            item.pop("ctx", None)
+            item["msg"] = "invalid secret value"
+        safe.append(item)
+    return safe
+
+
+def _is_loopback_client(request: Request) -> bool:
+    host = request.client.host if request.client else None
+    if not host:
+        return False
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_trusted_proxy(request: Request, trusted_proxy_cidrs: tuple[str, ...]) -> bool:
+    host = request.client.host if request.client else None
+    if not host:
+        return False
+    try:
+        address = ip_address(host)
+        return any(address in ip_network(cidr, strict=False) for cidr in trusted_proxy_cidrs)
+    except ValueError:
+        return False
+
+
+def _transport_allowed(request: Request, settings: Settings) -> bool:
+    # Container/orchestrator probes are internal and intentionally remain HTTP.
+    if request.url.path in {"/api/v1/health", "/api/v1/ready"} and _is_loopback_client(request):
+        return True
+    if settings.environment in {"development", "test"} and settings.transport_mode == "development_http":
+        return True
+    scheme = request.url.scheme.lower()
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").strip().lower()
+    if settings.transport_mode == "direct_https":
+        return scheme == "https"
+    if settings.transport_mode == "trusted_proxy":
+        if scheme == "https" and not forwarded_proto:
+            return True
+        return forwarded_proto == "https" and _is_trusted_proxy(request, settings.trusted_proxy_cidrs)
+    return False
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     configure_logging(runtime_settings.log_level)
@@ -271,6 +335,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runtime = request.app.state.runtime
         runtime.metrics.increment("request_count")
         try:
+            if not _transport_allowed(request, runtime.settings):
+                runtime.metrics.increment("insecure_transport_count")
+                runtime.audit.record(
+                    event_type="insecure_transport_rejected",
+                    model_version="security-v1",
+                    policy_version="transport-v1",
+                    result="rejected",
+                    reason="HTTPS is required at the public API boundary",
+                    request_id=request_id,
+                    source_ip=request.client.host if request.client else None,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content=_error_payload(
+                        "HTTPS_REQUIRED",
+                        "secure transport is required",
+                        request,
+                    ),
+                )
             content_length = request.headers.get("content-length")
             if content_length is not None:
                 try:
@@ -291,6 +374,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             max_request_bytes=runtime.settings.max_request_bytes,
                         ),
                     )
+            # Content-Length is optional for chunked requests. Read the body
+            # through the ASGI stream and stop as soon as the configured cap
+            # is crossed, then cache the bounded body for FastAPI validation.
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > runtime.settings.max_request_bytes:
+                    runtime.metrics.increment("request_too_large_count")
+                    return JSONResponse(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        content=_error_payload(
+                            "REQUEST_TOO_LARGE",
+                            "request body exceeds the configured limit",
+                            request,
+                            max_request_bytes=runtime.settings.max_request_bytes,
+                        ),
+                    )
+            request._body = bytes(body)
             response = await call_next(request)
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")
@@ -324,7 +425,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "VALIDATION_ERROR",
                 "request validation failed",
                 request,
-                details=jsonable_encoder(exc.errors(), custom_encoder={ValueError: str}),
+                details=jsonable_encoder(_safe_validation_errors(exc.errors()), custom_encoder={ValueError: str}),
             ),
         )
 
@@ -444,11 +545,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"count": len(sensors), "sensors": sensors, "health": runtime.sensor_manager.fleet_health()}
 
     @app.get("/api/v1/sensors/{sensor_id}/forecast")
-    async def get_sensor_forecast(sensor_id: str, _: str = Depends(require_role("viewer"))) -> dict[str, Any]:
+    async def get_sensor_forecast(
+        sensor_id: str, _: str = Depends(require_role("viewer"))
+    ) -> SensorForecastResponse:
         try:
             # Detail lookup establishes the 404 contract without running inference.
             runtime.sensor_registry.get(sensor_id)
-            return runtime.sensor_manager.forecast(sensor_id)
+            return SensorForecastResponse(**runtime.sensor_manager.forecast(sensor_id))
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+
+    @app.get("/api/v1/sensors/{sensor_id}/health", response_model=SensorHealthResponse)
+    async def get_sensor_health(
+        sensor_id: str, _: str = Depends(require_role("viewer"))
+    ) -> SensorHealthResponse:
+        try:
+            return SensorHealthResponse(**runtime.sensor_manager.health(sensor_id))
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+
+    @app.get("/api/v1/sensors/{sensor_id}/sources", response_model=SensorSourcesResponse)
+    async def get_sensor_sources(
+        sensor_id: str, _: str = Depends(require_role("viewer"))
+    ) -> SensorSourcesResponse:
+        try:
+            # Keep unknown-sensor behavior consistent with forecast retrieval.
+            runtime.sensor_registry.get(sensor_id)
+            return SensorSourcesResponse(**runtime.sensor_manager.sources(sensor_id))
+        except SensorNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "SENSOR_NOT_FOUND", "message": "sensor was not found"},
+            ) from exc
+
+    @app.get("/api/v1/sensors/{sensor_id}/mitigation", response_model=SensorMitigationResponse)
+    async def get_sensor_mitigation(
+        sensor_id: str, _: str = Depends(require_role("viewer"))
+    ) -> SensorMitigationResponse:
+        try:
+            runtime.sensor_registry.get(sensor_id)
+            return SensorMitigationResponse(**runtime.sensor_manager.mitigation(sensor_id))
         except SensorNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -684,10 +826,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail={"code": "SENSOR_RATE_LIMITED", "message": "sensor telemetry rate limit exceeded"},
             ) from exc
         states = [state.model_dump(mode="json") for state in body.states]
-        result = runtime.sensor_manager.ingest(sensor_id, states)
+        source_status_before = runtime.remote_sensor_runtime.snapshot(sensor_id).get("source_status")
+        source_activity = [row.model_dump(mode="json") for row in body.source_activity]
+        if source_activity:
+            source_counts: dict[str, int] = {}
+            for row in source_activity:
+                source_counts[str(row["interval_start"])] = source_counts.get(str(row["interval_start"]), 0) + 1
+            if any(count > runtime.settings.max_source_count_per_window for count in source_counts.values()):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "code": "SOURCE_ACTIVITY_LIMIT_EXCEEDED",
+                        "message": "source activity exceeds the configured per-window source limit",
+                    },
+                )
+        result = runtime.sensor_manager.ingest(
+            sensor_id,
+            states,
+            source_activity,
+            received_at=datetime.now(timezone.utc),
+        )
         runtime.metrics.increment("telemetry_batches_received")
         runtime.metrics.increment("runtime_state_count", len(states))
         runtime.metrics.increment("forecast_updates", int(result.get("forecast_updates", 0)))
+        source_status_after = str(result.get("source_status", "NO_SOURCE_ATTRIBUTION"))
+        runtime.audit.record(
+            event_type="source_telemetry_accepted" if source_activity else "source_telemetry_unavailable",
+            model_version="source-telemetry-v1",
+            policy_version="source-policy-v1",
+            sensor_id=sensor_id,
+            result=source_status_after,
+            reason="source activity accepted" if source_activity else "batch contained state telemetry only",
+        )
+        if source_status_after == "SOURCE_DATA_STALE":
+            runtime.audit.record(
+                event_type="source_telemetry_stale",
+                model_version="source-telemetry-v1",
+                policy_version="source-policy-v1",
+                sensor_id=sensor_id,
+                result="stale",
+                reason="source receipt freshness exceeded configured threshold",
+            )
+        elif source_status_before == "SOURCE_DATA_STALE" and source_status_after == "SOURCE_ATTRIBUTION_AVAILABLE":
+            runtime.audit.record(
+                event_type="source_telemetry_recovered",
+                model_version="source-telemetry-v1",
+                policy_version="source-policy-v1",
+                sensor_id=sensor_id,
+                result="recovered",
+                reason="new source activity receipt restored freshness",
+            )
         try:
             runtime.sensor_registry.accept_telemetry(
                 sensor_id,

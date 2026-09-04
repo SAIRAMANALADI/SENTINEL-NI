@@ -5,10 +5,14 @@ directory:
 
 ```text
 sentinel-agent stop
-python -m pip install --upgrade .\dist\sih26_26153-0.2.1-py3-none-any.whl
+python -m pip install --upgrade .\dist\sih26_26153-0.1.0-py3-none-any.whl
 sentinel-agent config validate
 sentinel-agent start
 ```
+
+Replace the wheel filename with the versioned artifact from the approved
+release you are installing. The current public candidate artifact is
+`sih26_26153-0.1.0-py3-none-any.whl`; no `0.2.1` project wheel is published.
 
 For a systemd-managed Linux agent, use `systemctl --user stop`, install the
 wheel, then `systemctl --user start`. The configuration, credential store,

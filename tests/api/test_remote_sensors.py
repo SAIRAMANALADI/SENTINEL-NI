@@ -93,6 +93,24 @@ def test_remote_telemetry_rejects_cross_interval_batch(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "CONTRACT_ERROR"
 
 
+def test_remote_telemetry_rejects_wrong_feature_names_as_structured_validation(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    features = {column: 0.0 for column in FEATURE_COLUMNS}
+    features.pop(FEATURE_COLUMNS[0])
+    features["unexpected_feature"] = 0.0
+    body = {
+        "schema_version": "1",
+        "sensor_id": sensor_id,
+        "sequence": 1,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "states": [{**_state(), "features": features}],
+    }
+    response = client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_remote_telemetry_rate_limit_is_checked_before_runtime(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path, rate_limit=1)))
     sensor_id, token = _register(client)
@@ -115,6 +133,46 @@ def test_remote_telemetry_reaches_the_real_lstm_after_ten_states(tmp_path: Path)
     assert response.status_code == 200
     assert response.json()["forecast"]["forecast_available"] is True
     assert response.json()["forecast"]["forecast_updates"] == 1
+
+
+def test_remote_telemetry_accepts_optional_source_activity_and_exposes_sensor_scope(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    sensor_id, token = _register(client)
+    source = {
+        "source_ip": "10.0.0.1",
+        "capture_day": "2018-02-22",
+        "interval_start": "2018-02-22T01:00:00+00:00",
+        "interval_end": "2018-02-22T01:00:10+00:00",
+        "flow_count": 2,
+        "packet_count": 10,
+        "byte_count": 10000,
+        "unique_destinations": 3,
+        "unique_destination_ports": 3,
+        "mean_packet_size": 1000,
+        "mean_iat": 1,
+        "syn_count": 0,
+        "ack_count": 10,
+        "rst_count": 0,
+        "packet_rate": 1,
+        "byte_rate": 1000,
+    }
+    body = {
+        "schema_version": "1",
+        "source_schema_version": "1",
+        "sensor_id": sensor_id,
+        "sequence": 1,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "states": [_state()],
+        "source_activity": [source],
+    }
+    response = client.post("/api/v1/telemetry", json=body, headers={"X-Sentinel-Sensor-Token": token})
+    assert response.status_code == 200
+    assert response.json()["forecast"]["source_status"] == "SOURCE_ATTRIBUTION_AVAILABLE"
+    detail = client.get(f"/api/v1/sensors/{sensor_id}", headers={"Authorization": "Bearer viewer-test"}).json()
+    runtime = detail["runtime"]
+    assert runtime["source_attribution"]["schema_version"] == "1"
+    assert runtime["source_priorities"][0]["source_ip"] == "10.0.0.1"
+    assert runtime["mitigation"]["simulation_only"] is True
 
 
 def test_remote_telemetry_rejects_naive_timestamps(tmp_path: Path) -> None:

@@ -1,4 +1,14 @@
-# Release Manifest
+# Release Manifest (Compatibility Pointer)
+
+The canonical public release record is now
+[`PUBLIC_RELEASE_MANIFEST.md`](PUBLIC_RELEASE_MANIFEST.md). This file remains
+for compatibility with links from earlier release phases; versioned serving
+contracts below are retained as historical reference and must agree with the
+canonical manifest.
+
+**Current gate:** Phase Z is the current coordinator record. This working-tree
+candidate is not published or externally validated; publication remains
+pending approved-commit/tag reconciliation and the external validation gates.
 
 ## Identity
 
@@ -31,14 +41,17 @@
 The supported Python distribution is a wheel or source distribution built from
 `pyproject.toml`. `requirements.lock.txt` records the verified Python 3.14
 dependency set. `frontend/package-lock.json` locks the frontend dependencies.
-Raw/processed datasets, PCAP archives, runtime registries, logs, and most model
-outputs are intentionally excluded from source distribution and Git.
+Full raw/processed datasets, PCAP archives, runtime registries, logs, and most
+model outputs are intentionally excluded from source distribution and Git.
+Explicitly approved small fixtures, tracked release checkpoints, and release
+evidence files are included where required for reproducible validation.
 
-## Evidence boundary
+## Current evidence boundary
 
-Automated Python, frontend, package, dependency, and contract checks are part
-of the release validation. Docker runtime, staging TLS/reverse proxy,
-physical multi-host operation, browser validation with real sensors, and
-sustained live capture soak require infrastructure not available in the
-current development environment. See [Environment Support](ENVIRONMENT_SUPPORT.md)
-and [Phase J validation](STAGING_VALIDATION_REPORT.md).
+The current decision is **CONDITIONAL CANDIDATE — PUBLICATION PENDING PROVENANCE RECONCILIATION**. Python, frontend,
+package, dependency, contract, local Docker, browser, customer-path, and
+isolated TLS checks pass. Physical multi-host/five-sensor operation, a
+30-minute soak/resource series, expired certificates, public ingress, and
+TruffleHog remain **NOT VERIFIED**. See the [Public Release Manifest](PUBLIC_RELEASE_MANIFEST.md)
+and [Phase Z External Validation Report](PHASE_Z_EXTERNAL_VALIDATION_REPORT.md)
+for the authoritative status.

@@ -10,12 +10,15 @@ The frontend does not implement forecasting, source attribution, mitigation poli
 
 ```text
 Browser :3000
-    -> Next.js same-origin /api/* rewrite
+    -> Next.js same-origin /api/* allowlisted server proxy
     -> FastAPI backend :8000
     -> existing inference, policy, telemetry, and audit paths
 ```
 
-The rewrite avoids browser CORS coupling. `BACKEND_URL` is set to `http://backend:8000` in Compose and defaults to `http://127.0.0.1:8000` for local development.
+The proxy avoids browser CORS coupling and keeps the optional server-side
+`SIH_API_TOKEN` out of the browser bundle. `BACKEND_URL` is set to
+`http://backend:8000` in Compose and defaults to `http://127.0.0.1:8000` for
+local development.
 
 ## UI composition
 
@@ -33,13 +36,22 @@ The visual system is handwritten CSS rather than a generic component library: da
 - `GET /api/v1/live`: polled every 5 seconds for telemetry, state buffer, forecast, source priorities, mitigation, and errors.
 - `POST /api/v1/demo`: explicit controlled fixture used only by Overview/Replay actions.
 
-An optional `NEXT_PUBLIC_SIH_API_TOKEN` is sent as a bearer token. Compose leaves authentication disabled by default for the local demo; production deployment must provide a real identity/secret-management boundary and TLS.
+The browser does not receive a bearer token. With
+`SIH_DASHBOARD_AUTH_ENABLED=true`, the `AuthGate` login calls the same-origin
+server route, which compares the submitted role token server-side, issues an
+opaque `HttpOnly`/`SameSite=Strict` session cookie, and maps the session role
+to the matching server-only Central token. Viewer sessions can read dashboard
+data; operator and admin sessions can invoke the allowlisted live/demo actions.
+Same-origin checks protect state-changing browser routes. Compose leaves this
+boundary disabled by default for the local demo; production must enable it,
+enable Central bearer auth, provide all three role tokens, and use TLS.
 
 ## Truthfulness rules
 
 - Live telemetry and replay are visually and textually distinct.
 - `Forecast Score` is never described as a calibrated probability.
-- The UI uses `Predictive warning` / `No predictive warning`, never an attack-detected claim.
+- The UI uses `Predictive warning` / `No predictive warning`, never a claim of
+  confirmed malicious activity.
 - Candidate sources are ranked evidence, not confirmed attribution.
 - Mitigation is recommendation-only; automatic blocking is not exposed.
 - Backend-unavailable, stopped, stale, and insufficient-history states are explicit.

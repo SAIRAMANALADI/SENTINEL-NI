@@ -1,0 +1,2 @@
+# Release-only publishing tools; keep separate from runtime and test installs.
+twine==6.1.0

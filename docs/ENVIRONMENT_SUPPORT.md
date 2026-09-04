@@ -6,22 +6,21 @@ runtime support.
 
 | Capability | Windows | Linux | Docker | Status / evidence |
 | --- | --- | --- | --- | --- |
-| Agent CLI | Tested on Windows 11, Python 3.14 | Package path documented; physical host not tested | Not the intended capture runtime | CLI, config, diagnostics, and lifecycle tests pass |
-| Packet capture | Scapy/Npcap path available on the validation host; no sustained live soak | Scapy/libpcap path documented; host capture not tested | Not supported from the central container | Partially tested; capture permission and interface are host requirements |
-| Local live mode | Interface discovery and capture contracts tested; real long run pending | Not run | Not supported by Compose | Environment-dependent |
-| Remote telemetry | Automated agent-to-central path tested | Protocol is platform-neutral; physical Linux pair not tested | Central API path only | Implemented and integration-tested; multi-host staging pending |
-| systemd service | Windows service manager intentionally not included | Unit file provided; service-manager run not tested here | Not applicable | Documented/packaged, not runtime-verified |
-| Central Docker | Docker CLI present but daemon unavailable | Intended deployment target | Compose config and image build path documented | Config/build checks pass; runtime pending |
-| TLS | Agent TLS configuration and fail-closed checks tested | Same code path; reverse proxy not tested | TLS termination is external | Configuration tested; staging certificate path pending |
-| Dashboard | Frontend typecheck/build tested | Same web runtime | Frontend image build path documented | Browser workflow with real sensors not tested |
+| Agent CLI | **TESTED** on Windows 11 / Python 3.14, including real foreground stop | Package path documented; physical Linux host **NOT VERIFIED** | Not the intended capture runtime | Help, version, config, diagnostics, and lifecycle checks pass |
+| Packet capture | **TESTED** with Scapy/Npcap Wi-Fi capture through the remote agent | Scapy/libpcap path documented; physical host **NOT VERIFIED** | Not supported from the central container | Ten contiguous accepted states reached on the Windows validation host |
+| Local live mode | Contracts tested; separate central local-live soak **NOT VERIFIED** | **NOT VERIFIED** | Not supported by Compose | Host capture requires interface and privilege access |
+| Remote telemetry | **TESTED** agent-to-central HTTPS path and L=10/K=5 forecast | Protocol is platform-neutral; physical Linux pair **NOT VERIFIED** | Central API path only | Multi-host/five-sensor staging **NOT VERIFIED** |
+| systemd service | Windows native service intentionally not included | Unit generation documented; service-manager boot/reboot **NOT VERIFIED** | Not applicable | Use an approved external supervisor on Windows |
+| Central Docker | **TESTED** with Docker Desktop Linux containers | Intended deployment target; physical Linux runtime **NOT VERIFIED** | **TESTED** config, build, health, restart, down/up | Local Compose only; not staging capacity evidence |
+| TLS | **TESTED** trusted private CA, wrong CA, hostname mismatch, HTTPS proxy path | Same code path; public Linux proxy **NOT VERIFIED** | TLS termination is external | Expiry/public DNS/public CA **NOT VERIFIED** |
+| Dashboard | **TESTED** typecheck/build and real-sensor/demo browser smoke | Same web runtime; physical Linux browser **NOT VERIFIED** | **TESTED** frontend container health | Forecast-ready real sensor view observed in Phase S |
 
 ## Tested baseline
 
 - Windows 11 Home Single Language, build 10.0.26200.
 - Python 3.14.3.
 - Scapy 2.7.0 with the configured capture backend.
-- Full Python regression suite: 281 passed, 2 warnings at the Phase J
-  baseline; rerun the current suite before release claims.
+- Full Python regression suite: 319 passed, 2 warnings in the Phase T pass.
 
 ## Runtime prerequisites
 
@@ -37,4 +36,5 @@ runtime support.
 Docker does not receive arbitrary host packet-capture capability. Run the
 agent on the monitored host, or use a supported external telemetry source.
 NetFlow/IPFIX listeners, mTLS, OIDC, HA, tenant isolation, and a Windows native
-service installer remain planned or explicitly outside this release.
+service installer remain planned or explicitly outside this release. Local
+Compose health is not evidence of public staging or production readiness.

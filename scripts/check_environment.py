@@ -39,7 +39,7 @@ def _check(label: str, passed: bool, detail: str) -> tuple[bool, str]:
 
 def run_checks() -> tuple[bool, list[str]]:
     checks: list[tuple[bool, str]] = []
-    checks.append(_check("Python version", sys.version_info >= (3, 10), sys.version.split()[0]))
+    checks.append(_check("Python version", (3, 12) <= sys.version_info[:2] < (3, 15), sys.version.split()[0]))
     checks.append(_check("Operating system", True, platform.platform()))
     for distribution, module in REQUIRED_PACKAGES.items():
         present = importlib.util.find_spec(module) is not None

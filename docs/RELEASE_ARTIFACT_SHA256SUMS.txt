@@ -1,0 +1,23 @@
+Sentinel / NI v0.1.0 release artifacts
+Generated: 2026-09-04
+Source revision: 41dbec11a433370e28aa083274202b1f92ddd5c5 plus preserved dirty working tree
+Build status: local Phase Y working-tree evidence; not an approved/tagged release
+
+SHA256  filename  size_bytes
+6C3B89ED8FED44B549DF2BB0859B74976B7872D75A8784FEAB52DEB024B21768  sih26_26153-0.1.0-py3-none-any.whl  153306
+C947138D69D8462EFA08218957F719864C12A6D32290756627C0FB56D4E6286C  sih26_26153-0.1.0.tar.gz  167286
+
+Verify from the directory containing the downloaded artifacts:
+
+```text
+Windows PowerShell:
+Get-FileHash .\sih26_26153-0.1.0-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\sih26_26153-0.1.0.tar.gz -Algorithm SHA256
+
+Linux/macOS:
+sha256sum sih26_26153-0.1.0-py3-none-any.whl sih26_26153-0.1.0.tar.gz
+```
+
+The artifact names, sizes, and hashes describe the local Phase Y working-tree
+build. They are not a claim that the files have been uploaded to GitHub or
+PyPI, or that they are tied to the existing `v0.1.0` tag.

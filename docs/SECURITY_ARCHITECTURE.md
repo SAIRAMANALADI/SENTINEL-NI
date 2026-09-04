@@ -75,3 +75,16 @@ Compose binds the API port to loopback. Production deployments should place a
 TLS reverse proxy in front of it and keep port 8000 off the public interface.
 The current limiter and registry are process-local/single-node; HA storage,
 distributed rate limiting, OIDC, and mTLS are future work.
+
+The central API transport policy is explicit:
+
+- `development_http` permits local HTTP only in `development` or `test`.
+- `direct_https` requires the request scheme to be HTTPS and ignores forwarded
+  protocol headers.
+- `trusted_proxy` permits internal HTTP only when the peer address is inside
+  `SIH_TRUSTED_PROXY_CIDRS` and `X-Forwarded-Proto` is exactly `https`.
+
+Production defaults to `direct_https`; production cannot use
+`development_http`. Loopback `/api/v1/health` and `/api/v1/ready` probes remain
+available over internal HTTP for orchestration. Forwarded headers from an
+untrusted peer never satisfy the HTTPS requirement.

@@ -23,9 +23,9 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/health
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/ready
 ```
 
-For the containerized central path, use `docker compose up -d --build`. The
-Compose configuration has been validated, but Docker runtime startup has not
-been executed in the current development environment.
+For the containerized central path, use `docker compose up -d --build`. Local
+Compose startup, health, restart, and down/up were validated for this release
+candidate. This remains local runtime evidence, not public staging capacity.
 
 ## 2. Open the dashboard
 

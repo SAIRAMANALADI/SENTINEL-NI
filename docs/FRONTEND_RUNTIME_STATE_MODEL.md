@@ -25,7 +25,14 @@ The demo response is isolated in the UI. Its `history_length` is the only histor
 - `STOPPED`: capture is stopped and no current forecast exists.
 - `CAPTURE_UNAVAILABLE`: the live adapter cannot access the configured capture interface.
 - `ERROR`: the runtime reported a processing or model error.
-- `BACKEND_UNAVAILABLE`: `/api/v1/ready` or `/api/v1/live` failed. The frontend clears current live/demo data and renders the outage state only.
+- `BACKEND_UNAVAILABLE`: `/api/v1/live` or a readiness request failed to
+  reach the central service. The frontend clears current live/demo data and
+  renders the outage state only.
+- `BACKEND_DEGRADED`: the central service responded with a structured 503
+  readiness body. The frontend preserves reachable live data and shows the
+  central readiness reason instead of claiming a network outage.
+- `MOCK`: the backend explicitly reports mock/static telemetry; it is not
+  relabeled as replay or live capture.
 
 ## Transitions
 

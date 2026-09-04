@@ -13,12 +13,24 @@
 
 ## [Unreleased]
 
-- Added public operator quickstart, environment support matrix, development
-  guide, release manifest, and release notes.
+The entries below describe the current working-tree release candidate. They
+are not evidence that the existing `v0.1.0` tag or a GitHub release contains
+these changes.
+
+- Added the Phase U public release manifest, final checklist, and final report;
+  refreshed the current release notes, checklist, environment support matrix,
+  README journey, and deployment runbook with evidence-backed status.
+- Added an explicit first-time operator path: Overview, Sensors, Add Sensor,
+  Sensor Detail, Forecast, Sources, and Mitigation; Replay remains a labeled
+  secondary walkthrough.
 - Added a deterministic release audit for tracked-file hygiene, documentation
   links, obvious secret patterns, local paths, and frozen-path changes.
 - Extended CI coverage to the frontend typecheck/build, package build, and the
   public release audit.
 - Added package metadata and direct private security-advisory instructions.
-- Documented that Docker runtime, staging TLS, physical multi-host deployment,
-  and sustained live soak remain environment-dependent validation gates.
+- Documented that local Docker runtime, isolated TLS, browser smoke, and the
+  real Windows remote forecast path pass, while public ingress, physical
+  multi-host deployment, TruffleHog, and sustained live soak remain validation
+  gates outside this environment.
+- Added public issue templates, external-user validation guidance, issue triage
+  policy, release artifact checksums, and a publication preparation report.

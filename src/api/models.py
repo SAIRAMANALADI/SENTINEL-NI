@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, IPvAnyAddress, field_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, IPvAnyAddress, field_validator, model_validator
+
+from src.features.network_state import FEATURE_COLUMNS
 
 
 MAX_SOURCE_PRIORITY_EVENTS = 4096
 MAX_MITIGATION_SOURCES = 1024
 MAX_REMOTE_STATES_PER_BATCH = 60
+MAX_REMOTE_SOURCE_ACTIVITY_PER_BATCH = 120
+MAX_REMOTE_SOURCES_PER_WINDOW = 256
 
 
 class StatePoint(BaseModel):
@@ -141,6 +145,60 @@ class MetricsResponse(BaseModel):
     latencies: dict[str, dict[str, Any]]
 
 
+class SensorHealthResponse(BaseModel):
+    """Read-only health contract for one registered sensor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sensor_id: str
+    status: str
+    registration_state: str
+    disabled: bool
+    health: dict[str, str]
+    source_status: str
+    telemetry_freshness_seconds: FiniteFloat | None = None
+    heartbeat_freshness_seconds: FiniteFloat | None = None
+    capture_status: str
+    connection_status: str
+    last_seen: str | None = None
+    last_heartbeat: str | None = None
+    last_telemetry_at: str | None = None
+
+
+class SensorForecastResponse(BaseModel):
+    """Current cached forecast for one sensor; pending history is not an error."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sensor_id: str
+    status: str
+    forecast_ready: bool
+    forecast: dict[str, Any] | None = None
+
+
+class SensorSourcesResponse(BaseModel):
+    """Candidate-source evidence scoped to one sensor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sensor_id: str
+    status: str
+    source_count: int
+    source_priorities: list[dict[str, Any]]
+    source_attribution: dict[str, Any]
+
+
+class SensorMitigationResponse(BaseModel):
+    """Recommendation-only mitigation output scoped to one sensor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sensor_id: str
+    source_status: str
+    simulation_only: bool
+    recommendations: list[dict[str, Any]]
+
+
 class ErrorResponse(BaseModel):
     error: dict[str, Any]
 
@@ -187,12 +245,76 @@ class RemoteStatePoint(BaseModel):
     capture_day: date
     features: dict[str, FiniteFloat] = Field(min_length=17, max_length=17)
 
+    @field_validator("features")
+    @classmethod
+    def features_must_match_frozen_schema(cls, value: dict[str, FiniteFloat]) -> dict[str, FiniteFloat]:
+        expected = set(FEATURE_COLUMNS)
+        actual = set(value)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            unexpected = sorted(actual - expected)
+            detail = []
+            if missing:
+                detail.append(f"missing={missing}")
+            if unexpected:
+                detail.append(f"unexpected={unexpected}")
+            raise ValueError("features must match the frozen 17-feature schema (" + ", ".join(detail) + ")")
+        return value
+
     @field_validator("timestamp")
     @classmethod
     def timestamp_must_be_timezone_aware(cls, value: datetime) -> datetime:
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("state timestamp must include a timezone")
         return value
+
+
+class RemoteSourceActivityPoint(BaseModel):
+    """One authenticated, metadata-only source activity row.
+
+    These fields are source intelligence, never model features.  The source
+    identity is deliberately scoped to the enclosing sensor telemetry batch.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_ip: IPvAnyAddress
+    capture_day: date
+    interval_start: datetime
+    interval_end: datetime
+    flow_count: int = Field(ge=0)
+    packet_count: int = Field(ge=0)
+    byte_count: FiniteFloat = Field(ge=0)
+    unique_destinations: int = Field(ge=0)
+    unique_destination_ports: int = Field(ge=0)
+    mean_packet_size: FiniteFloat = Field(ge=0)
+    mean_iat: FiniteFloat = Field(ge=0)
+    syn_count: int = Field(ge=0)
+    ack_count: int = Field(ge=0)
+    rst_count: int = Field(ge=0)
+    packet_rate: FiniteFloat = Field(ge=0)
+    byte_rate: FiniteFloat = Field(ge=0)
+
+    @field_validator("interval_start", "interval_end")
+    @classmethod
+    def interval_timestamps_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("source activity interval timestamps must include a timezone")
+        return value
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> "RemoteSourceActivityPoint":
+        if self.interval_start.date() != self.capture_day or self.interval_end.date() != self.capture_day:
+            raise ValueError("source activity interval must belong to capture_day")
+        if self.interval_end - self.interval_start != timedelta(seconds=10):
+            raise ValueError("source activity intervals must be exactly 10 seconds")
+        if self.interval_start.second % 10 or self.interval_start.microsecond:
+            raise ValueError("source activity interval_start must be aligned to 10 seconds")
+        if self.flow_count < 0 or self.packet_count < 0:
+            raise ValueError("source activity counts must be non-negative")
+        if self.syn_count > self.packet_count or self.ack_count > self.packet_count or self.rst_count > self.packet_count:
+            raise ValueError("TCP flag counts cannot exceed packet_count")
+        return self
 
 
 class RemoteTelemetryBatch(BaseModel):
@@ -203,6 +325,10 @@ class RemoteTelemetryBatch(BaseModel):
     sequence: int = Field(ge=1)
     sent_at: datetime
     states: list[RemoteStatePoint] = Field(min_length=1, max_length=MAX_REMOTE_STATES_PER_BATCH)
+    source_schema_version: Literal["1"] | None = None
+    source_activity: list[RemoteSourceActivityPoint] = Field(
+        default_factory=list, max_length=MAX_REMOTE_SOURCE_ACTIVITY_PER_BATCH
+    )
 
     @field_validator("sent_at")
     @classmethod
@@ -210,3 +336,19 @@ class RemoteTelemetryBatch(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("sent_at must include a timezone")
         return value
+
+    @model_validator(mode="after")
+    def validate_source_activity(self) -> "RemoteTelemetryBatch":
+        if self.source_activity and self.source_schema_version != "1":
+            raise ValueError("source_schema_version='1' is required when source_activity is present")
+        keys = [(str(row.source_ip), row.interval_start) for row in self.source_activity]
+        if len(keys) != len(set(keys)):
+            raise ValueError("source_activity contains duplicate source/window rows")
+        windows: dict[datetime, set[str]] = {}
+        for source_ip, interval_start in keys:
+            windows.setdefault(interval_start, set()).add(source_ip)
+        if any(len(sources) > MAX_REMOTE_SOURCES_PER_WINDOW for sources in windows.values()):
+            raise ValueError(
+                f"source_activity exceeds {MAX_REMOTE_SOURCES_PER_WINDOW} sources in one 10-second window"
+            )
+        return self

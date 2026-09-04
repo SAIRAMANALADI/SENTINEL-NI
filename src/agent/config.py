@@ -10,13 +10,18 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
+import math
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Any
 from urllib.parse import urlsplit
 
 from src.agent import __version__
+
+
+SENSOR_ID_PATTERN = re.compile(r"^sensor-[a-f0-9]{16}$")
 
 
 def default_agent_dir() -> Path:
@@ -56,6 +61,8 @@ def _atomic_json_save(path: Path, payload: dict[str, Any]) -> None:
     ) as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
         temporary = Path(handle.name)
     _restrict_file(temporary)
     temporary.replace(path)
@@ -122,7 +129,11 @@ class AgentConfig:
                 credentials = json.loads(credential_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 raise ValueError(f"agent credential store is not valid JSON: {credential_path}") from exc
-            if not isinstance(credentials, dict) or not isinstance(credentials.get("runtime_token"), str):
+            if (
+                not isinstance(credentials, dict)
+                or not isinstance(credentials.get("runtime_token"), str)
+                or not credentials["runtime_token"].strip()
+            ):
                 raise ValueError(f"agent credential store is malformed: {credential_path}")
             config.runtime_token = credentials["runtime_token"]
         return config
@@ -147,6 +158,10 @@ class AgentConfig:
         self.credentials_path = credential_path
         if self.runtime_token:
             _atomic_json_save(credential_path, {"runtime_token": self.runtime_token})
+        else:
+            # Do not leave a credential that a later load could silently
+            # resurrect after an operator intentionally clears identity.
+            credential_path.unlink(missing_ok=True)
         payload = asdict(self)
         for key in (
             "buffer_dir", "pid_path", "log_path", "credentials_path",
@@ -161,7 +176,10 @@ class AgentConfig:
 
     def redacted(self) -> dict[str, Any]:
         payload = asdict(self)
-        for key in ("buffer_dir", "pid_path", "log_path", "credentials_path"):
+        for key in (
+            "buffer_dir", "pid_path", "log_path", "credentials_path",
+            "tls_ca_path", "tls_client_cert_path", "tls_client_key_path",
+        ):
             if payload.get(key) is not None:
                 payload[key] = str(payload[key])
         if payload.get("runtime_token"):
@@ -171,7 +189,7 @@ class AgentConfig:
     def validate(self, *, require_identity: bool = False) -> None:
         if self.environment not in {"development", "production"}:
             raise ValueError("environment must be development or production")
-        if not self.server_url:
+        if not isinstance(self.server_url, str) or not self.server_url.strip():
             raise ValueError("server_url is required; run `sentinel-agent init --server-url ...`")
         try:
             parsed = urlsplit(self.server_url)
@@ -190,18 +208,42 @@ class AgentConfig:
             raise ValueError("production sensor transport requires an https:// server_url")
         if self.capture_backend != "scapy":
             raise ValueError("capture_backend must be scapy")
+
+        integer_settings = {
+            "heartbeat_interval_seconds": self.heartbeat_interval_seconds,
+            "batch_size": self.batch_size,
+            "max_buffer_batches": self.max_buffer_batches,
+            "max_buffer_bytes": self.max_buffer_bytes,
+            "log_max_bytes": self.log_max_bytes,
+            "log_backup_count": self.log_backup_count,
+        }
+        for name, value in integer_settings.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+        if isinstance(self.batch_interval_seconds, bool) or not isinstance(self.batch_interval_seconds, (int, float)) or not math.isfinite(self.batch_interval_seconds):
+            raise ValueError("batch_interval_seconds must be a finite number")
         if self.heartbeat_interval_seconds <= 0 or self.batch_size <= 0 or self.batch_interval_seconds <= 0:
             raise ValueError("heartbeat_interval_seconds, batch_size, and batch_interval_seconds must be positive")
         if self.max_buffer_batches <= 0 or self.max_buffer_bytes <= 0:
             raise ValueError("buffer limits must be positive")
+        for name, value in {
+            "retry_base_seconds": self.retry_base_seconds,
+            "retry_max_seconds": self.retry_max_seconds,
+            "retry_jitter_seconds": self.retry_jitter_seconds,
+            "connection_timeout_seconds": self.connection_timeout_seconds,
+        }.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{name} must be a finite number")
         if self.retry_base_seconds <= 0:
             raise ValueError("retry_base_seconds must be positive")
         if self.retry_max_seconds < self.retry_base_seconds:
             raise ValueError("retry_max_seconds must be greater than or equal to retry_base_seconds")
         if self.retry_jitter_seconds < 0:
             raise ValueError("retry_jitter_seconds must not be negative")
-        if self.buffer_overflow_policy.upper() not in {"DROP_OLDEST", "REJECT_NEW"}:
+        if not isinstance(self.buffer_overflow_policy, str) or self.buffer_overflow_policy.upper() not in {"DROP_OLDEST", "REJECT_NEW"}:
             raise ValueError("buffer_overflow_policy must be DROP_OLDEST or REJECT_NEW")
+        if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise ValueError("log_level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
         if self.log_max_bytes <= 0 or self.log_backup_count < 0:
             raise ValueError("log_max_bytes must be positive and log_backup_count must not be negative")
         if self.connection_timeout_seconds <= 0:
@@ -225,8 +267,16 @@ class AgentConfig:
                 raise ValueError(f"{name} does not exist: {path}")
         if self.environment == "production" and not self.tls_verify:
             raise ValueError("production sensor transport requires TLS certificate verification")
-        if isinstance(self.next_sequence, bool) or self.next_sequence < 1:
+        if isinstance(self.next_sequence, bool) or not isinstance(self.next_sequence, int) or self.next_sequence < 1:
             raise ValueError("next_sequence must be positive")
+        if self.sensor_id is not None and (
+            not isinstance(self.sensor_id, str) or not SENSOR_ID_PATTERN.fullmatch(self.sensor_id)
+        ):
+            raise ValueError("sensor_id does not match the registered sensor format")
+        if self.runtime_token is not None and (
+            not isinstance(self.runtime_token, str) or not self.runtime_token.strip()
+        ):
+            raise ValueError("runtime_token must be a non-empty string when configured")
         if require_identity and (not self.sensor_id or not self.runtime_token):
             raise ValueError("agent is not registered; run `sentinel-agent register`")
 

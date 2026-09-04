@@ -5,6 +5,11 @@ verification and a registered sensor credential. The server URL cannot contain
 embedded credentials, queries, or fragments. Enrollment credentials are
 one-time values and runtime credentials are sensor-specific.
 
+The agent's production `--server-url` must be the public HTTPS endpoint exposed
+by the deployment's trusted TLS boundary. It must not point directly at the
+internal Sentinel API port `:8000`. Development may use an HTTP loopback or
+private endpoint only with the central API's explicit `development_http` mode.
+
 The transport accepts a custom CA path and optional client certificate/key
 paths. The latter is an mTLS-ready interface only; no PKI or mTLS deployment is
 claimed by this release. A development-only `tls_verify=false` setting is

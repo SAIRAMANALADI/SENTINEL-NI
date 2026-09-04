@@ -50,9 +50,9 @@ python -m src.agent start
    sequence ledger, and health record.
 10. API: enrollment, registration, sensor list/detail, heartbeat, and telemetry
     endpoints are implemented under `/api/v1`.
-11. Frontend: Connected servers view supports real enrollment generation,
-    server selection, health/freshness, sensor-scoped forecast context, and
-    honest state-only source limitations.
+11. Frontend: Connected servers view supports administrator-controlled
+    enrollment handoff, server selection, health/freshness, sensor-scoped
+    forecast context, and honest state-only source limitations.
 12. Security: strict validation, request bounds, rate limits, duplicate
     handling, secret redaction, no raw payload forwarding, and deployment
     guidance for TLS/private networking.

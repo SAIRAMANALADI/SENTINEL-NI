@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import random
+import re
 import signal
 import time
 from typing import Any
@@ -14,16 +15,18 @@ from typing import Any
 from src.agent.buffer import BufferFullError, DiskTelemetryBuffer
 from src.agent.collector import AgentCollector
 from src.agent.config import AgentConfig
-from src.agent.identity import hostname
+from src.agent.identity import hostname, validate_registration_response
 from src.agent.telemetry import TelemetryBatcher
 from src.agent.transport import TransportError, request_json
 from src.agent.validation import validate_startup
 from src.telemetry.live import LiveTelemetryAdapter
+from src.streaming.source_activity import SOURCE_ACTIVITY_COLUMNS
 from src.platform.logging import configure_logging, get_logger, log_event
 
 
 LOGGER = get_logger(__name__)
 TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+TELEMETRY_ACK_STATUSES = frozenset({"ACCEPTED", "DUPLICATE_ACKNOWLEDGED"})
 
 
 def _utc_now() -> datetime:
@@ -51,6 +54,8 @@ class SensorClient:
         return f"{self.config.server_url.rstrip('/')}{path}"
 
     def register(self, enrollment_token: str) -> dict[str, Any]:
+        if not isinstance(enrollment_token, str) or not enrollment_token.strip():
+            raise ValueError("enrollment_token must be a non-empty string")
         result = request_json(
             self.config.server_url,
             "/api/v1/sensors/register",
@@ -58,6 +63,7 @@ class SensorClient:
             payload={"enrollment_token": enrollment_token, "hostname": hostname(), "agent_version": self.config.agent_version},
             **self._transport_options(),
         )
+        validate_registration_response(result)
         log_event(LOGGER, "sensor registration succeeded", event_type="registration_succeeded")
         return result
 
@@ -89,6 +95,7 @@ class SensorClient:
             sensor_id=self.config.sensor_id,
             sequence=payload.get("sequence"),
             state_count=len(payload.get("states", [])),
+            source_activity_count=len(payload.get("source_activity", [])),
         )
         result = request_json(
             self.config.server_url,
@@ -98,6 +105,8 @@ class SensorClient:
             payload=payload,
             **self._transport_options(),
         )
+        if str(result.get("status", "")).upper() not in TELEMETRY_ACK_STATUSES:
+            raise TransportError("central service returned an invalid telemetry acknowledgment")
         log_event(
             LOGGER,
             "telemetry send succeeded",
@@ -131,6 +140,9 @@ class SensorAgent:
             overflow_policy=config.buffer_overflow_policy,
         )
         self._pending: deque[dict[str, Any]] = deque(maxlen=max(config.batch_size * 4, config.batch_size))
+        self._pending_source_activity: deque[dict[str, Any]] = deque(
+            maxlen=max(240, config.batch_size * 20)
+        )
         self._running = False
         self._last_heartbeat = 0.0
         self._collector: AgentCollector | None = None
@@ -147,7 +159,14 @@ class SensorAgent:
         self._last_error: str | None = None
         self._last_error_category: str | None = None
         self._connection_status = "DISCONNECTED"
-        self._counters = {"states_collected": 0, "batches_sent": 0, "batches_buffered": 0, "retries": 0, "permanent_rejections": 0}
+        self._counters = {
+            "states_collected": 0,
+            "source_activity_rows_collected": 0,
+            "batches_sent": 0,
+            "batches_buffered": 0,
+            "retries": 0,
+            "permanent_rejections": 0,
+        }
         self._batcher = TelemetryBatcher(
             config.sensor_id or "",
             sequence_start=config.next_sequence,
@@ -159,8 +178,12 @@ class SensorAgent:
         self.config.next_sequence = next_sequence
         self.config.save()
 
-    def _payload(self, states: list[dict[str, Any]]) -> dict[str, Any]:
-        payload = self._batcher.build(states)
+    def _payload(
+        self,
+        states: list[dict[str, Any]],
+        source_activity: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload = self._batcher.build(states, source_activity=source_activity)
         log_event(
             LOGGER,
             "telemetry batch created",
@@ -168,13 +191,24 @@ class SensorAgent:
             sensor_id=self.config.sensor_id,
             sequence=payload["sequence"],
             state_count=len(states),
+            source_activity_count=len(source_activity or []),
         )
         return payload
 
-    def submit_states(self, states: list[dict[str, Any]]) -> str:
+    def submit_states(
+        self,
+        states: list[dict[str, Any]],
+        source_activity: list[dict[str, Any]] | None = None,
+    ) -> str:
         if not states:
             return "empty"
-        payload = self._payload(states)
+        payload = self._payload(states, source_activity)
+        # Never send a newer sequence ahead of an older batch already queued
+        # on disk. The central registry accepts monotonic sequences and will
+        # reject that otherwise-valid newer batch as a later replay conflict.
+        if self.buffer.count:
+            self._enqueue_payload(payload)
+            return "buffered"
         try:
             response = self.client.telemetry(payload)
             self._mark_delivery(payload, response)
@@ -202,27 +236,30 @@ class SensorAgent:
                     status_code=exc.status_code,
                 )
                 raise RuntimeError(f"central service rejected telemetry: {exc}") from exc
-            try:
-                self.buffer.enqueue(payload)
-            except BufferFullError:
-                log_event(
-                    LOGGER,
-                    "telemetry buffer full",
-                    event_type="telemetry_buffer_full",
-                    sensor_id=self.config.sensor_id,
-                    sequence=payload["sequence"],
-                )
-                raise
+            self._enqueue_payload(payload, status_code=exc.status_code)
+            return "buffered"
+
+    def _enqueue_payload(self, payload: dict[str, Any], *, status_code: int | None = None) -> None:
+        try:
+            self.buffer.enqueue(payload)
+        except BufferFullError:
             log_event(
                 LOGGER,
-                "telemetry buffered after transient failure",
-                event_type="telemetry_buffered",
+                "telemetry buffer full",
+                event_type="telemetry_buffer_full",
                 sensor_id=self.config.sensor_id,
                 sequence=payload["sequence"],
-                status_code=exc.status_code,
             )
-            self._counters["batches_buffered"] += 1
-            return "buffered"
+            raise
+        log_event(
+            LOGGER,
+            "telemetry buffered",
+            event_type="telemetry_buffered",
+            sensor_id=self.config.sensor_id,
+            sequence=payload["sequence"],
+            status_code=status_code,
+        )
+        self._counters["batches_buffered"] += 1
 
     def flush_buffer(self) -> int:
         if time.monotonic() < self._next_retry_at:
@@ -281,7 +318,11 @@ class SensorAgent:
         self._connection_status = "CONNECTED"
 
     def _remember_error(self, error: Exception, category: str) -> None:
-        self._last_error = str(error)[:240]
+        message = str(error)
+        if self.config.runtime_token:
+            message = message.replace(self.config.runtime_token, "<redacted>")
+        message = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1<redacted>", message)
+        self._last_error = message[:240]
         self._last_error_category = category
 
     def _heartbeat(self) -> bool:
@@ -322,6 +363,30 @@ class SensorAgent:
             self._pending_since = time.monotonic()
         return True
 
+    def _on_source_activity(self, activity: Any) -> bool:
+        """Queue bounded JSON-safe source rows beside the next state batch."""
+
+        rows = activity.to_dict(orient="records")
+        if len(self._pending_source_activity) + len(rows) > self._pending_source_activity.maxlen:
+            return False
+        for row in rows:
+            copied = {column: row[column] for column in SOURCE_ACTIVITY_COLUMNS}
+            copied["interval_start"] = copied["interval_start"].isoformat()
+            copied["interval_end"] = copied["interval_end"].isoformat()
+            copied["capture_day"] = str(copied["capture_day"])
+            copied["flow_count"] = int(copied["flow_count"])
+            copied["packet_count"] = int(copied["packet_count"])
+            copied["unique_destinations"] = int(copied["unique_destinations"])
+            copied["unique_destination_ports"] = int(copied["unique_destination_ports"])
+            copied["syn_count"] = int(copied["syn_count"])
+            copied["ack_count"] = int(copied["ack_count"])
+            copied["rst_count"] = int(copied["rst_count"])
+            for field in ("byte_count", "mean_packet_size", "mean_iat", "packet_rate", "byte_rate"):
+                copied[field] = float(copied[field])
+            self._pending_source_activity.append(copied)
+        self._counters["source_activity_rows_collected"] += len(rows)
+        return True
+
     def _drain_pending(self, *, force: bool = False) -> None:
         while self._pending:
             ready_by_size = len(self._pending) >= self.config.batch_size
@@ -333,8 +398,20 @@ class SensorAgent:
                 return
             count = min(self.config.batch_size, len(self._pending))
             states = [self._pending.popleft() for _ in range(count)]
+            source_count = min(120, len(self._pending_source_activity))
+            source_activity = [self._pending_source_activity.popleft() for _ in range(source_count)]
             try:
-                self.submit_states(states)
+                self.submit_states(states, source_activity)
+            except BufferFullError as exc:
+                # The state has not been durably queued. Put both queues back
+                # in their original order so capture never silently loses a
+                # batch under REJECT_NEW or a byte limit.
+                for state in reversed(states):
+                    self._pending.appendleft(state)
+                for row in reversed(source_activity):
+                    self._pending_source_activity.appendleft(row)
+                self._remember_error(exc, "telemetry_buffer_full")
+                return
             except Exception as exc:
                 # A permanent rejection is quarantined by submit_states. Keep
                 # the capture loop alive and expose the failure in status.
@@ -351,8 +428,13 @@ class SensorAgent:
         )
         log_event(LOGGER, "agent startup validated", event_type="agent_startup_validated", sensor_id=self.config.sensor_id)
         self.config.pid_path.parent.mkdir(parents=True, exist_ok=True)
+        _stop_request_path(self.config.pid_path).unlink(missing_ok=True)
         self.config.pid_path.write_text(str(os.getpid()), encoding="utf-8")
-        self._collector = AgentCollector(interface=self.config.interface or "", on_state=self._on_state)
+        self._collector = AgentCollector(
+            interface=self.config.interface or "",
+            on_state=self._on_state,
+            on_source_activity=self._on_source_activity,
+        )
         self._adapter = LiveTelemetryAdapter(
             self.config.interface,
             capture_filter=self.config.capture_filter,
@@ -376,6 +458,16 @@ class SensorAgent:
             self._heartbeat()
             self._last_heartbeat = time.monotonic()
             while self._running:
+                if _stop_requested(self.config.pid_path, os.getpid()):
+                    log_event(
+                        LOGGER,
+                        "agent shutdown requested",
+                        event_type="shutdown_requested",
+                        sensor_id=self.config.sensor_id,
+                        status_code=0,
+                    )
+                    self.stop()
+                    continue
                 self._drain_pending()
                 try:
                     self.flush_buffer()
@@ -390,11 +482,20 @@ class SensorAgent:
             pass
         finally:
             self._capture_status = "STOPPING"
-            if self._adapter is not None:
-                self._adapter.stop()
-            if self._collector is not None:
-                self._collector.flush()
-            self._drain_pending(force=True)
+            try:
+                if self._adapter is not None:
+                    self._adapter.stop()
+            except Exception as exc:
+                self._remember_error(exc, "capture_shutdown_error")
+            try:
+                if self._collector is not None:
+                    self._collector.flush()
+            except Exception as exc:
+                self._remember_error(exc, "collector_shutdown_error")
+            try:
+                self._drain_pending(force=True)
+            except Exception as exc:
+                self._remember_error(exc, "pending_shutdown_error")
             try:
                 self.flush_buffer()
             except Exception as exc:
@@ -403,6 +504,7 @@ class SensorAgent:
                 self.config.pid_path.unlink()
             except FileNotFoundError:
                 pass
+            _stop_request_path(self.config.pid_path).unlink(missing_ok=True)
             for signal_number, previous in previous_handlers.items():
                 signal.signal(signal_number, previous)
             self._running = False
@@ -432,16 +534,109 @@ class SensorAgent:
             "last_sent_sequence": self._last_sent_sequence,
             "last_acknowledged_sequence": self._last_acknowledged_sequence,
             "last_error": self._last_error,
+            "pending_source_activity_rows": len(self._pending_source_activity),
             "buffer": self.buffer.status,
             "counters": dict(self._counters),
             "config": self.config.redacted(),
         }
 
 
-def stop_pid(path: str | Path) -> bool:
+STOP_TIMEOUT_SECONDS = 10.0
+_WINDOWS_STILL_ACTIVE = 259
+_WINDOWS_ERROR_ACCESS_DENIED = 5
+_WINDOWS_ERROR_INVALID_PARAMETER = 87
+_WINDOWS_ERROR_NOT_FOUND = 1168
+
+
+def _stop_request_path(pid_path: Path) -> Path:
+    return pid_path.with_name(f"{pid_path.name}.stop")
+
+
+def _process_exists(pid: int) -> bool:
+    """Check liveness without sending a signal to an arbitrary process."""
+
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError as exc:
+            raise RuntimeError(f"permission denied inspecting agent process {pid}") from exc
+        return True
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        error = ctypes.get_last_error()
+        if error in {_WINDOWS_ERROR_INVALID_PARAMETER, _WINDOWS_ERROR_NOT_FOUND}:
+            return False
+        if error == _WINDOWS_ERROR_ACCESS_DENIED:
+            raise RuntimeError(f"permission denied inspecting agent process {pid}")
+        raise OSError(error, f"unable to inspect agent process {pid}")
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            error = ctypes.get_last_error()
+            raise OSError(error, f"unable to inspect agent process {pid}")
+        return exit_code.value == _WINDOWS_STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _stop_requested(path: str | Path, pid: int) -> bool:
+    request_path = _stop_request_path(Path(path))
+    try:
+        return request_path.read_text(encoding="utf-8").strip() == str(pid)
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _write_stop_request(pid_path: Path, pid: int) -> Path:
+    request_path = _stop_request_path(pid_path)
+    temporary = request_path.with_name(f".{request_path.name}-{os.getpid()}")
+    temporary.write_text(str(pid), encoding="utf-8")
+    temporary.replace(request_path)
+    return request_path
+
+
+def stop_pid(path: str | Path, *, timeout_seconds: float = STOP_TIMEOUT_SECONDS) -> bool:
+    """Request an agent-specific graceful stop and verify process exit.
+
+    A PID file is only a rendezvous point. The stop command never terminates
+    the PID directly, so a stale or incorrect PID cannot kill an unrelated
+    process. The foreground agent consumes a request containing its own PID
+    and performs the normal capture/buffer/transport cleanup in ``finally``.
+    """
+
     pid_path = Path(path)
     if not pid_path.is_file():
         return False
-    pid = int(pid_path.read_text(encoding="utf-8").strip())
-    os.kill(pid, signal.SIGTERM)
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be a positive number")
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"agent PID file is malformed: {pid_path}") from exc
+    if pid <= 0:
+        raise RuntimeError(f"agent PID file contains an invalid process id: {pid_path}")
+
+    if not _process_exists(pid):
+        pid_path.unlink(missing_ok=True)
+        return False
+
+    request_path = _write_stop_request(pid_path, pid)
+    deadline = time.monotonic() + float(timeout_seconds)
+    try:
+        while _process_exists(pid):
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"agent process {pid} did not stop within {timeout_seconds:g}s; no process was terminated"
+                )
+            time.sleep(0.05)
+    finally:
+        request_path.unlink(missing_ok=True)
+    pid_path.unlink(missing_ok=True)
     return True

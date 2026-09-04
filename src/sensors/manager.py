@@ -98,6 +98,7 @@ class SensorManager:
         return sensor
 
     def forecast(self, sensor_id: str) -> dict[str, Any]:
+        self.registry.get(sensor_id)
         snapshot = self._runtime_snapshot(sensor_id)
         return {
             "sensor_id": sensor_id,
@@ -106,8 +107,64 @@ class SensorManager:
             "forecast": snapshot.get("forecast"),
         }
 
-    def ingest(self, sensor_id: str, states: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-        return self.runtime.ingest(sensor_id, states)
+    def health(self, sensor_id: str) -> dict[str, Any]:
+        sensor = self.registry.get(sensor_id)
+        snapshot = self._runtime_snapshot(sensor_id)
+        return {
+            "sensor_id": sensor_id,
+            "status": sensor["status"],
+            "registration_state": sensor.get("registration_state", "REGISTERED"),
+            "disabled": bool(sensor.get("disabled", False)),
+            "health": {
+                "agent": sensor.get("agent_status", "UNKNOWN"),
+                "telemetry": sensor.get("telemetry_status", "UNKNOWN"),
+                "forecast": "READY" if snapshot.get("forecast_status") == "FORECAST_READY" else "WAITING",
+            },
+            "source_status": snapshot.get("source_status", "NO_SOURCE_ATTRIBUTION"),
+            "telemetry_freshness_seconds": sensor.get("telemetry_freshness_seconds"),
+            "heartbeat_freshness_seconds": sensor.get("heartbeat_freshness_seconds"),
+            "capture_status": sensor.get("capture_status", "UNKNOWN"),
+            "connection_status": sensor.get("connection_status", "DISCONNECTED"),
+            "last_seen": sensor.get("last_seen"),
+            "last_heartbeat": sensor.get("last_heartbeat"),
+            "last_telemetry_at": sensor.get("last_telemetry_at"),
+        }
+
+    def sources(self, sensor_id: str) -> dict[str, Any]:
+        # Keep the manager boundary safe for non-HTTP callers too; otherwise
+        # a typo could allocate an unregistered runtime entry.
+        self.registry.get(sensor_id)
+        snapshot = self._runtime_snapshot(sensor_id)
+        rows = [dict(row) for row in snapshot.get("source_priorities", [])]
+        return {
+            "sensor_id": sensor_id,
+            "status": snapshot.get("source_status", "NO_SOURCE_ATTRIBUTION"),
+            "source_count": len(rows),
+            "source_priorities": rows,
+            "source_attribution": dict(snapshot.get("source_attribution", {})),
+        }
+
+    def mitigation(self, sensor_id: str) -> dict[str, Any]:
+        self.registry.get(sensor_id)
+        snapshot = self._runtime_snapshot(sensor_id)
+        mitigation = snapshot.get("mitigation", {})
+        recommendations = [dict(row) for row in mitigation.get("recommendations", [])]
+        return {
+            "sensor_id": sensor_id,
+            "source_status": snapshot.get("source_status", "NO_SOURCE_ATTRIBUTION"),
+            "simulation_only": True,
+            "recommendations": recommendations,
+        }
+
+    def ingest(
+        self,
+        sensor_id: str,
+        states: Sequence[Mapping[str, Any]],
+        source_activity: Sequence[Mapping[str, Any]] | None = None,
+        *,
+        received_at: Any | None = None,
+    ) -> dict[str, Any]:
+        return self.runtime.ingest(sensor_id, states, source_activity, received_at=received_at)
 
     def disable(self, sensor_id: str, *, reason: str | None = None) -> dict[str, Any]:
         self.registry.disable(sensor_id, reason=reason)

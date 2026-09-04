@@ -89,6 +89,20 @@ For supported platforms and evidence boundaries, see
 open-source release candidate, not a claim of production capacity or universal
 platform support.
 
+### First-time operator path
+
+The primary product journey is **Overview → Sensors → Add Sensor → Sensor
+Detail → Forecast → Sources → Mitigation**. Start Central Sentinel, issue a
+short-lived enrollment credential as an administrator, install and register
+the agent on the monitored server, then wait for fresh heartbeat and
+aggregated telemetry. The dashboard keeps Agent, Telemetry, and Forecast
+health separate, and it withholds forecast output until ten valid contiguous
+states are available. Replay is a secondary walkthrough for prepared data and
+is always labeled as demo/replay mode.
+
+Customer requests never pass through Sentinel: the customer application keeps
+its normal request/response path while the sensor observes traffic in parallel.
+
 ### Run the central platform
 
 #### Docker Compose
@@ -158,8 +172,9 @@ Read the [agent installation guide](docs/AGENT_INSTALLATION.md), the
 [distributed architecture](docs/DISTRIBUTED_SENSOR_ARCHITECTURE.md), and the
 [sensor security guide](docs/SENSOR_SECURITY.md) before deployment.
 
-The public release contract is recorded in [Release Manifest](docs/RELEASE_MANIFEST.md),
-and contributor setup is in [Development Guide](docs/DEVELOPMENT.md).
+The public release contract is recorded in the [Public Release Manifest](docs/PUBLIC_RELEASE_MANIFEST.md)
+(the older [Release Manifest](docs/RELEASE_MANIFEST.md) is retained as a compatibility
+pointer), and contributor setup is in [Development Guide](docs/DEVELOPMENT.md).
 
 ## Forecasting contract
 
@@ -237,17 +252,25 @@ disabled in production.
   attribution; the dashboard states that limitation explicitly.
 
 Recommended topology: a private network or firewall boundary, a TLS reverse
-proxy, and an authenticated Central Sentinel API. mTLS, OIDC, tenant
-isolation, and high availability are future hardening work.
+proxy, an authenticated Central Sentinel API, and the bundled dashboard
+session boundary enabled with `SIH_DASHBOARD_AUTH_ENABLED=true`. Dashboard
+login accepts one of the server-side viewer/operator/admin role tokens and
+never sends a bearer token to the browser. mTLS, OIDC, tenant isolation, and
+high availability are future hardening work; the v0.1 dashboard session store
+is process-local and in-memory, so restarts invalidate sessions and multi-
+instance deployment requires sticky routing.
 
 ## Verification
 
 The current repository verification record includes:
 
-    python -m pytest -q       281 passed
+    python -m pytest -q       323 passed, 2 warnings
     npm run typecheck         passed
     npm run build             passed
-    docker compose config     passed
+    python -m build           wheel and sdist passed
+    python scripts/release_audit.py  passed
+    pip check                 passed
+    docker compose config     passed; local Compose runtime health/restart passed
 
 Remote-sensor coverage includes enrollment, authentication, telemetry
 validation, duplicate and rate-limit handling, bounded buffering, a real
@@ -261,7 +284,7 @@ for the exact evidence and remaining deployment work.
     configs/     Versioned model, state, and operating-policy contracts
     docs/        Architecture, security, deployment, and operating guides
     frontend/    Next.js and React dashboard
-    models/      Local checkpoint artifacts (Git ignored)
+    models/      Tracked release checkpoints plus ignored/generated local artifacts
     scripts/     Reproducibility and validation commands
     src/agent/   Remote Sentinel Sensor CLI and delivery runtime
     src/api/     Central FastAPI service and contracts
@@ -298,6 +321,15 @@ for the exact evidence and remaining deployment work.
 - [Current Limitations](docs/LIMITATIONS.md)
 - [Contributing](CONTRIBUTING.md)
 - [Release Notes](docs/RELEASE_NOTES.md)
+- [Public Release Manifest](docs/PUBLIC_RELEASE_MANIFEST.md)
+- [Final Public Release Checklist](docs/FINAL_PUBLIC_RELEASE_CHECKLIST.md)
+- [Phase U Final Public Release Report](docs/PHASE_U_FINAL_PUBLIC_RELEASE_REPORT.md)
+- [Public Release Checklist](docs/PUBLIC_RELEASE_CHECKLIST.md)
+- [External Validation](docs/EXTERNAL_VALIDATION.md)
+- [Issue Triage](docs/ISSUE_TRIAGE.md)
+- [Release Artifact Checksums](docs/RELEASE_ARTIFACT_SHA256SUMS.txt)
+- [Subagent Release Review](docs/SUBAGENT_RELEASE_REVIEW.md)
+- [Phase T Public Release Candidate Report](docs/PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md)
 
 ## Limitations and roadmap
 

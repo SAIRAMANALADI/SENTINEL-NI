@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from ipaddress import ip_network
 from pathlib import Path
 
 
@@ -54,6 +55,9 @@ class Settings:
     sensor_rate_limit_per_minute: int = 60
     registration_rate_limit_per_minute: int = 10
     max_sensor_count: int = 1024
+    max_source_count_per_window: int = 256
+    transport_mode: str = "development_http"
+    trusted_proxy_cidrs: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -91,6 +95,14 @@ class Settings:
             raise ValueError("authentication is enabled but no role token is configured")
         if environment == "production" and not auth_enabled:
             raise ValueError("production configuration requires SIH_AUTH_ENABLED=true")
+        transport_mode = os.getenv(
+            "SIH_TRANSPORT_MODE", "direct_https" if environment == "production" else "development_http"
+        ).strip().lower()
+        if transport_mode not in {"development_http", "direct_https", "trusted_proxy"}:
+            raise ValueError("SIH_TRANSPORT_MODE must be development_http, direct_https, or trusted_proxy")
+        trusted_proxy_cidrs = tuple(
+            value.strip() for value in os.getenv("SIH_TRUSTED_PROXY_CIDRS", "").split(",") if value.strip()
+        )
 
         return cls(
             api_host=os.getenv("SIH_API_HOST", "0.0.0.0"),
@@ -129,6 +141,9 @@ class Settings:
             sensor_rate_limit_per_minute=int(os.getenv("SIH_SENSOR_RATE_LIMIT_PER_MINUTE", "60")),
             registration_rate_limit_per_minute=int(os.getenv("SIH_REGISTRATION_RATE_LIMIT_PER_MINUTE", "10")),
             max_sensor_count=int(os.getenv("SIH_MAX_SENSOR_COUNT", "1024")),
+            max_source_count_per_window=int(os.getenv("SIH_MAX_SOURCE_COUNT_PER_WINDOW", "256")),
+            transport_mode=transport_mode,
+            trusted_proxy_cidrs=trusted_proxy_cidrs,
         )
 
     def validate(self) -> None:
@@ -153,14 +168,27 @@ class Settings:
             raise ValueError("registration_rate_limit_per_minute must be positive")
         if self.max_sensor_count <= 0:
             raise ValueError("max_sensor_count must be positive")
+        if self.max_source_count_per_window <= 0:
+            raise ValueError("max_source_count_per_window must be positive")
         if self.environment not in {"development", "test", "production"}:
             raise ValueError("environment must be development, test, or production")
+        if self.transport_mode not in {"development_http", "direct_https", "trusted_proxy"}:
+            raise ValueError("transport_mode must be development_http, direct_https, or trusted_proxy")
+        for cidr in self.trusted_proxy_cidrs:
+            try:
+                ip_network(cidr, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"trusted_proxy_cidrs contains an invalid network: {cidr}") from exc
         if self.environment == "production":
             if not self.auth_enabled:
                 raise ValueError("production configuration requires authentication")
             missing_roles = [role for role, token in self.role_tokens().items() if not token]
             if missing_roles:
                 raise ValueError(f"production authentication is missing role tokens: {missing_roles}")
+            if self.transport_mode == "development_http":
+                raise ValueError("production configuration cannot use development_http transport")
+            if self.transport_mode == "trusted_proxy" and not self.trusted_proxy_cidrs:
+                raise ValueError("trusted_proxy transport requires trusted_proxy_cidrs")
 
     def role_tokens(self) -> dict[str, str | None]:
         return {"viewer": self.viewer_token, "operator": self.operator_token, "admin": self.admin_token}

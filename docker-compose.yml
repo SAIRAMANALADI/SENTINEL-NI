@@ -7,6 +7,8 @@ services:
       SIH_API_HOST: 0.0.0.0
       SIH_API_PORT: 8000
       SIH_ENV: ${SIH_ENV:-development}
+      SIH_TRANSPORT_MODE: ${SIH_TRANSPORT_MODE:-development_http}
+      SIH_TRUSTED_PROXY_CIDRS: ${SIH_TRUSTED_PROXY_CIDRS:-}
       SIH_TELEMETRY_MODE: mock
       SIH_AUTH_ENABLED: ${SIH_AUTH_ENABLED:-false}
       SIH_VIEWER_TOKEN: ${SIH_VIEWER_TOKEN:-}
@@ -23,7 +25,7 @@ services:
       - ./configs:/app/configs:ro
       - ./data/samples:/app/data/samples:ro
       - ./results/audit:/app/results/audit
-      - sentinel_registry:/app/results/sensors
+      - ./results/sensors:/app/results/sensors
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     healthcheck:
@@ -51,7 +53,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "${DASHBOARD_PORT:-8501}:8501"
+      - "127.0.0.1:${DASHBOARD_PORT:-8501}:8501"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
       interval: 15s
@@ -65,6 +67,13 @@ services:
       dockerfile: frontend/Dockerfile
     environment:
       BACKEND_URL: http://backend:8000
+      SIH_ENV: ${SIH_ENV:-development}
+      SIH_AUTH_ENABLED: ${SIH_AUTH_ENABLED:-false}
+      SIH_DASHBOARD_AUTH_ENABLED: ${SIH_DASHBOARD_AUTH_ENABLED:-${SIH_AUTH_ENABLED:-false}}
+      SIH_VIEWER_TOKEN: ${SIH_VIEWER_TOKEN:-}
+      SIH_OPERATOR_TOKEN: ${SIH_OPERATOR_TOKEN:-}
+      SIH_ADMIN_TOKEN: ${SIH_ADMIN_TOKEN:-}
+      DASHBOARD_SESSION_TTL_SECONDS: ${DASHBOARD_SESSION_TTL_SECONDS:-28800}
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -79,7 +88,3 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-
-volumes:
-  sentinel_registry:
-    name: ${SENTINEL_REGISTRY_VOLUME:-sentinel-registry}

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
+from threading import RLock
 from typing import Any
 import uuid
 
@@ -48,6 +50,7 @@ class DiskTelemetryBuffer:
         self._dropped_bytes = 0
         self._corrupt_batches = 0
         self._partial_batches = 0
+        self._lock = RLock()
         self.path.mkdir(parents=True, exist_ok=True)
         self.quarantine_path.mkdir(parents=True, exist_ok=True)
         self._quarantine_partial_files()
@@ -57,37 +60,49 @@ class DiskTelemetryBuffer:
 
     @property
     def count(self) -> int:
-        return len(self._files())
+        with self._lock:
+            return len(self._files())
 
     @property
     def size_bytes(self) -> int:
-        return sum(item.stat().st_size for item in self._files())
+        with self._lock:
+            total = 0
+            for item in self._files():
+                try:
+                    total += item.stat().st_size
+                except FileNotFoundError:
+                    continue
+            return total
 
     @property
     def buffered_state_count(self) -> int:
-        total = 0
-        for item in self._files():
-            try:
-                payload = json.loads(item.read_text(encoding="utf-8"))
-                total += len(payload.get("states", []))
-            except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-        return total
+        with self._lock:
+            total = 0
+            for item in self._files():
+                try:
+                    payload = json.loads(item.read_text(encoding="utf-8"))
+                    states = payload.get("states", []) if isinstance(payload, dict) else []
+                    if isinstance(payload, dict) and isinstance(states, list):
+                        total += len(states)
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            return total
 
     @property
     def status(self) -> dict[str, Any]:
-        return {
-            "buffered_batches": self.count,
-            "buffered_states": self.buffered_state_count,
-            "buffered_bytes": self.size_bytes,
-            "max_batches": self.max_batches,
-            "max_bytes": self.max_bytes,
-            "overflow_policy": self.overflow_policy,
-            "dropped_batches": self._dropped_batches,
-            "dropped_bytes": self._dropped_bytes,
-            "corrupt_batches": self._corrupt_batches,
-            "partial_batches": self._partial_batches,
-        }
+        with self._lock:
+            return {
+                "buffered_batches": len(self._files()),
+                "buffered_states": self.buffered_state_count,
+                "buffered_bytes": self.size_bytes,
+                "max_batches": self.max_batches,
+                "max_bytes": self.max_bytes,
+                "overflow_policy": self.overflow_policy,
+                "dropped_batches": self._dropped_batches,
+                "dropped_bytes": self._dropped_bytes,
+                "corrupt_batches": self._corrupt_batches,
+                "partial_batches": self._partial_batches,
+            }
 
     def _quarantine(self, item: Path, *, reason: str) -> None:
         destination = self.quarantine_path / f"{reason}-{item.name}-{uuid.uuid4().hex[:8]}"
@@ -115,42 +130,49 @@ class DiskTelemetryBuffer:
         self._dropped_bytes += size
 
     def enqueue(self, payload: dict[str, Any]) -> None:
-        sequence = int(payload["sequence"])
+        if not isinstance(payload, dict):
+            raise ValueError("buffer payload must be a JSON object")
+        raw_sequence = payload.get("sequence")
+        if isinstance(raw_sequence, bool) or not isinstance(raw_sequence, int) or raw_sequence < 1:
+            raise ValueError("buffer payload sequence must be a positive integer")
+        sequence = raw_sequence
         encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         destination = self.path / f"batch-{sequence:020d}.json"
-        if destination.exists():
-            return
-        if len(encoded) > self.max_bytes:
-            raise BufferFullError("telemetry batch exceeds the configured local buffer byte limit")
-        while self.count >= self.max_batches or self.size_bytes + len(encoded) > self.max_bytes:
-            if self.overflow_policy == "REJECT_NEW":
-                raise BufferFullError("local telemetry buffer is full; new telemetry was rejected")
-            before = self.count
-            self._evict_oldest()
-            if self.count == before:
-                raise BufferFullError("local telemetry buffer could not evict its oldest batch")
-        with tempfile.NamedTemporaryFile(mode="wb", dir=self.path, prefix=".batch-", delete=False) as handle:
-            handle.write(encoded)
-            temporary = Path(handle.name)
-        temporary.replace(destination)
+        with self._lock:
+            if destination.exists():
+                return
+            if len(encoded) > self.max_bytes:
+                raise BufferFullError("telemetry batch exceeds the configured local buffer byte limit")
+            while len(self._files()) >= self.max_batches or self.size_bytes + len(encoded) > self.max_bytes:
+                if self.overflow_policy == "REJECT_NEW":
+                    raise BufferFullError("local telemetry buffer is full; new telemetry was rejected")
+                before = len(self._files())
+                self._evict_oldest()
+                if len(self._files()) == before:
+                    raise BufferFullError("local telemetry buffer could not evict its oldest batch")
+            with tempfile.NamedTemporaryFile(mode="wb", dir=self.path, prefix=".batch-", delete=False) as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary = Path(handle.name)
+            temporary.replace(destination)
 
     def peek(self) -> dict[str, Any] | None:
-        while True:
-            files = self._files()
-            if not files:
-                return None
-            item = files[0]
-            try:
-                payload = json.loads(item.read_text(encoding="utf-8"))
-                if not isinstance(payload, dict) or int(payload.get("sequence", 0)) < 1:
-                    raise BufferCorruptionError("queued telemetry envelope is invalid")
-                return payload
-            except (OSError, TypeError, ValueError, json.JSONDecodeError, BufferCorruptionError) as exc:
-                self._quarantine(item, reason="corrupt")
-                self._corrupt_batches += 1
-                if isinstance(exc, BufferCorruptionError):
-                    continue
-                continue
+        with self._lock:
+            while True:
+                files = self._files()
+                if not files:
+                    return None
+                item = files[0]
+                try:
+                    payload = json.loads(item.read_text(encoding="utf-8"))
+                    sequence = payload.get("sequence") if isinstance(payload, dict) else None
+                    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+                        raise BufferCorruptionError("queued telemetry envelope is invalid")
+                    return payload
+                except (OSError, TypeError, ValueError, json.JSONDecodeError, BufferCorruptionError):
+                    self._quarantine(item, reason="corrupt")
+                    self._corrupt_batches += 1
 
     def reject(self, payload: dict[str, Any], *, reason: str, status_code: int | None = None) -> None:
         """Record a permanently rejected envelope without retrying it forever."""
@@ -164,8 +186,10 @@ class DiskTelemetryBuffer:
             "reason": reason[:240],
         }
         target = rejected / f"sequence-{record['sequence']:020d}.json"
-        target.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        with self._lock:
+            target.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
 
     def pop(self, sequence: int) -> None:
         destination = self.path / f"batch-{int(sequence):020d}.json"
-        destination.unlink(missing_ok=True)
+        with self._lock:
+            destination.unlink(missing_ok=True)

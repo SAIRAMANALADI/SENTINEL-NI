@@ -58,8 +58,8 @@ IMPORTS = (
 
 def main() -> int:
     print(f"Python {sys.version.split()[0]}")
-    if sys.version_info < (3, 10):
-        raise RuntimeError("Python 3.10 or newer is required for the foundation.")
+    if not (3, 12) <= sys.version_info[:2] < (3, 15):
+        raise RuntimeError("Python 3.12 through 3.14 is required for the release package.")
 
     missing_directories = [
         path for path in REQUIRED_DIRECTORIES if not (PROJECT_ROOT / path).is_dir()

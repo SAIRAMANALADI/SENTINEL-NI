@@ -68,12 +68,16 @@ PACKET_CAPTURE_CAPABILITIES = SourceCapabilities(
 REMOTE_AGENT_CAPABILITIES = SourceCapabilities(
     SourceType.REMOTE_AGENT,
     SourceStatus.SUPPORTED,
-    available=("approved_17_feature_state", "state_timestamp", "capture_day", "sensor_id", "telemetry_sequence"),
-    derivable=(),
-    unavailable=("raw_packets", "packet_payload", "packet_level_tcp_flags", "packet_level_ttl"),
+    available=(
+        "approved_17_feature_state", "state_timestamp", "capture_day", "sensor_id", "telemetry_sequence",
+        "source_ip", "destination_ip", "transport_ports", "protocol", "packet_length", "tcp_flags",
+        "source_activity_10_second_windows",
+    ),
+    derivable=("source_flow_counts", "source_packet_counts", "source_byte_counts", "source_growth", "candidate_source_priority"),
+    unavailable=("raw_packets", "packet_payload", "packet_level_ttl", "packet_level_tcp_window", "packet_level_fragmentation"),
     state_compatible=True,
     supervised_state_compatible=False,
-    notes="Authenticated HTTPS state telemetry; packet attribution remains unavailable from aggregate state batches.",
+    notes="Authenticated HTTPS telemetry carries optional metadata-only source windows when the agent has packet endpoint/port fields; source IP is never a model feature.",
 )
 
 REPLAY_CAPABILITIES = SourceCapabilities(

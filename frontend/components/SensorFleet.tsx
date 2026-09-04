@@ -1,25 +1,47 @@
-import { useState } from "react";
 import type { SensorSummary } from "../lib/types";
 
 function freshness(value?: number | null) {
   if (typeof value !== "number") return "—";
-  if (value < 60) return `${Math.round(value)}s ago`;
+  if (value < 60) return `${Math.max(0, Math.round(value))}s ago`;
   return `${Math.round(value / 60)}m ago`;
 }
 
-export function SensorFleet({ sensors, selectedSensorId, onSelect }: { sensors: SensorSummary[]; selectedSensorId: string | null; onSelect: (sensorId: string | null) => void }) {
-  const [serverUrl, setServerUrl] = useState(() => typeof window === "undefined" ? "" : window.location.origin);
-  const [interfaceName, setInterfaceName] = useState("Ethernet");
-  const commands = [
-    `sentinel-agent init --server-url ${serverUrl} --interface "${interfaceName}" --environment production`,
-    "sentinel-agent register --enrollment-token <one-time-enrollment-token>",
-    "sentinel-agent config validate",
-    "sentinel-agent start",
-  ].join("\n");
+function healthValue(sensor: SensorSummary, plane: "agent" | "telemetry" | "forecast") {
+  if (plane === "agent") return sensor.health?.agent || sensor.agent_status || "UNKNOWN";
+  if (plane === "telemetry") return sensor.health?.telemetry || sensor.telemetry_status || "UNKNOWN";
+  return sensor.health?.forecast || (sensor.forecast_ready ? "READY" : "WAITING");
+}
 
+export function SensorFleet({
+  sensors,
+  error,
+  selectedSensorId,
+  onSelect,
+  onAddSensor,
+  onOpenDetail,
+}: {
+  sensors: SensorSummary[];
+  error: string | null;
+  selectedSensorId: string | null;
+  onSelect: (sensorId: string | null) => void;
+  onAddSensor: () => void;
+  onOpenDetail: () => void;
+}) {
   return <section className="section-block sensor-fleet" aria-labelledby="sensor-fleet-heading">
-    <div className="section-heading"><div><p className="overline">Infrastructure</p><h2 id="sensor-fleet-heading">Connected servers</h2><p className="section-description">Remote sensors send aggregated network states to this processing service. The central server does not capture their packets directly.</p></div><span className="section-note">{sensors.length} registered sensor{sensors.length === 1 ? "" : "s"}</span></div>
-    <div className="connect-server"><div><p className="overline">Onboarding</p><h3>Add a remote server</h3><p>Enrollment is controlled through the central administrator path. The browser never receives or sends a global admin credential. The remote operator runs the agent; customer requests remain outside Sentinel.</p></div><div className="connect-fields"><label>Central URL<input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} /></label><label>Interface<input value={interfaceName} onChange={(event) => setInterfaceName(event.target.value)} /></label></div><div className="enrollment-result"><strong>Five-step connection</strong><small>1. An administrator creates a one-time enrollment credential on the central server. 2. Install the agent on the remote host. 3. Register it once. 4. Start the agent and wait for a heartbeat. 5. The sensor becomes ONLINE only after fresh heartbeat and telemetry.</small><pre>{commands}</pre></div></div>
-    {sensors.length === 0 ? <div className="empty-state"><span className="empty-mark">—</span><div><strong>No sensors connected yet.</strong><p>Add a sensor to begin monitoring a server. Create a one-time enrollment credential, install the agent on the remote host, then register and start it.</p></div></div> : <div className="sensor-list">{sensors.map((sensor) => <article className={`sensor-card sensor-${sensor.status.toLowerCase()} ${selectedSensorId === sensor.sensor_id ? "sensor-selected" : ""}`} key={sensor.sensor_id}><button className="sensor-select" onClick={() => onSelect(selectedSensorId === sensor.sensor_id ? null : sensor.sensor_id)} aria-pressed={selectedSensorId === sensor.sensor_id}><div className="sensor-card-top"><div><span className="sensor-status">{sensor.status}</span><h3>{sensor.hostname}</h3><code>{sensor.sensor_id}</code></div><span className="sensor-agent">AGENT {sensor.agent_version}</span></div><div className="sensor-health-strip" aria-label="Sensor health"><span className={`health-${(sensor.health?.agent || sensor.agent_status || "unknown").toLowerCase()}`}><small>Process</small><strong>{sensor.health?.agent || sensor.agent_status || "UNKNOWN"}</strong></span><span className={`health-${(sensor.capture_status || "unknown").toLowerCase()}`}><small>Capture</small><strong>{sensor.capture_status || "UNKNOWN"}</strong></span><span className={`health-${(sensor.connection_status || "unknown").toLowerCase()}`}><small>Connection</small><strong>{sensor.connection_status || "UNKNOWN"}</strong></span><span className={`health-${(sensor.health?.telemetry || sensor.telemetry_status || "unknown").toLowerCase()}`}><small>Telemetry</small><strong>{sensor.health?.telemetry || sensor.telemetry_status || "UNKNOWN"}</strong></span><span className={`health-${(sensor.health?.forecast || "waiting").toLowerCase()}`}><small>Forecast</small><strong>{sensor.health?.forecast || (sensor.runtime?.forecast_status === "FORECAST_READY" ? "READY" : "WAITING")}</strong></span></div>{sensor.latest_warning && <div className="sensor-warning">PREDICTIVE WARNING · +10s score meets threshold</div>}<div className="sensor-facts"><span><small>Last heartbeat</small><strong>{freshness(sensor.heartbeat_freshness_seconds)}</strong></span><span><small>Last telemetry</small><strong>{freshness(sensor.telemetry_freshness_seconds)}</strong></span><span><small>States</small><strong>{sensor.runtime?.state_count ?? 0}</strong></span><span><small>History</small><strong>{sensor.runtime?.history_length ?? 0} / {sensor.runtime?.history_required ?? 10}</strong></span></div></button>{selectedSensorId === sensor.sensor_id && <div className="sensor-detail"><p><strong>Selected server</strong> · all forecast context below is scoped to this sensor.</p>{sensor.source_type && <p><strong>Telemetry Source</strong> · {sensor.source_type} · <strong>Source Status</strong> · {sensor.source_status || "UNKNOWN"}</p>}{sensor.last_event && <p><strong>Last Event</strong> · {sensor.last_event}</p>}{sensor.last_telemetry && <p><strong>Last Telemetry</strong> · {sensor.last_telemetry}</p>}<p>Forecast: {sensor.runtime?.forecast_status === "FORECAST_READY" ? "READY" : "WAITING FOR DATA"} · Candidate Sources: {sensor.runtime?.source_status === "UNAVAILABLE_FROM_AGGREGATED_STATE_TELEMETRY" ? "not available from state-only telemetry" : "available"}.</p>{sensor.agent_last_error && <p className="sensor-error">Last agent error: {sensor.agent_last_error}</p>}</div>}<details className="technical-details"><summary>Technical details</summary><p>Accepted sequence {sensor.last_accepted_sequence ?? sensor.last_sequence ?? 0} · last sent {sensor.last_sent_sequence ?? 0} · buffered batches {sensor.buffered_item_count ?? 0} · buffered bytes {sensor.buffered_bytes ?? 0}.</p></details></article>)}</div>}
+    <div className="section-heading"><div><p className="overline">Sensors</p><h2 id="sensor-fleet-heading">Monitor your servers</h2><p className="section-description">Each monitored server runs its own agent and sends aggregated network states to Sentinel. The central service never captures the remote interface directly.</p></div><div className="section-heading-actions"><span className="section-note">{sensors.length} registered sensor{sensors.length === 1 ? "" : "s"}</span><button onClick={onAddSensor}>Add sensor</button></div></div>
+
+    {error ? <div className="empty-state sensor-empty"><span className="empty-mark">!</span><div><strong>Sensor fleet unavailable.</strong><p>{error}</p><p>Retry the connection before treating the fleet as empty.</p></div></div> : sensors.length === 0 ? <div className="empty-state sensor-empty"><span className="empty-mark">—</span><div><strong>No sensors registered yet.</strong><p>Add a sensor to open the guided install, register, start, heartbeat, and telemetry verification flow.</p><button onClick={onAddSensor}>Add your first sensor</button></div></div> : <div className="sensor-list">{sensors.map((sensor) => {
+      const selected = selectedSensorId === sensor.sensor_id;
+      return <article className={`sensor-card sensor-${sensor.status.toLowerCase()} ${selected ? "sensor-selected" : ""}`} key={sensor.sensor_id}>
+        <button className="sensor-select" onClick={() => onSelect(selected ? null : sensor.sensor_id)} aria-pressed={selected}>
+          <div className="sensor-card-top"><div><span className="sensor-status">{sensor.status}</span><h3>{sensor.hostname}</h3><code>{sensor.sensor_id}</code></div><span className="sensor-agent">AGENT {sensor.agent_version}</span></div>
+          <div className="sensor-health-strip" aria-label="Sensor health"><span className={`health-${healthValue(sensor, "agent").toLowerCase()}`}><small>Agent</small><strong>{healthValue(sensor, "agent")}</strong></span><span className={`health-${(sensor.capture_status || "unknown").toLowerCase()}`}><small>Capture</small><strong>{sensor.capture_status || "UNKNOWN"}</strong></span><span className={`health-${(sensor.connection_status || "unknown").toLowerCase()}`}><small>Connection</small><strong>{sensor.connection_status || "UNKNOWN"}</strong></span><span className={`health-${healthValue(sensor, "telemetry").toLowerCase()}`}><small>Telemetry</small><strong>{healthValue(sensor, "telemetry")}</strong></span><span className={`health-${healthValue(sensor, "forecast").toLowerCase()}`}><small>Forecast</small><strong>{healthValue(sensor, "forecast")}</strong></span></div>
+          {sensor.latest_warning && sensor.status === "ONLINE" && <div className="sensor-warning">PREDICTIVE WARNING · +10s score meets threshold</div>}
+          <div className="sensor-facts"><span><small>Last heartbeat</small><strong>{freshness(sensor.heartbeat_freshness_seconds)}</strong></span><span><small>Last telemetry</small><strong>{freshness(sensor.telemetry_freshness_seconds)}</strong></span><span><small>States</small><strong>{sensor.state_count ?? sensor.runtime?.state_count ?? 0}</strong></span><span><small>History</small><strong>{sensor.history_length ?? sensor.runtime?.history_length ?? 0} / {sensor.history_required ?? sensor.runtime?.history_required ?? 10}</strong></span></div>
+        </button>
+        {selected && <div className="sensor-card-footer"><span>Selected sensor · detail is scoped to this server.{sensor.source_status ? ` Source status: ${sensor.source_status}.` : ""}{sensor.agent_last_error ? ` Last agent error: ${sensor.agent_last_error}` : ""}</span><button onClick={onOpenDetail}>Open sensor detail</button></div>}
+        <details className="technical-details"><summary>Technical details</summary><p>Accepted sequence {sensor.last_accepted_sequence ?? sensor.last_sequence ?? 0} · last sent {sensor.last_sent_sequence ?? 0} · buffered batches {sensor.buffered_item_count ?? 0} · buffered bytes {sensor.buffered_bytes ?? 0}.</p></details>
+      </article>;
+    })}</div>}
   </section>;
 }

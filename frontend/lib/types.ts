@@ -45,6 +45,12 @@ export interface ForecastPayload {
 
 export interface SourcePriority {
   source_ip: string;
+  sensor_id?: string;
+  interval_start?: string;
+  interval_end?: string;
+  first_seen?: string;
+  last_seen?: string;
+  active?: boolean;
   priority: string;
   measured_reasons?: string;
   priority_points?: number;
@@ -53,7 +59,17 @@ export interface SourcePriority {
   unique_destinations?: number;
   unique_destination_ports?: number;
   flow_count?: number;
+  flow_growth?: number;
+  packet_growth?: number;
+  byte_growth?: number;
   activity_features?: Record<string, number>;
+  recent_activity?: Record<string, number>;
+  forecast_context?: {
+    available?: boolean;
+    forecast_score?: number | null;
+    network_warning?: boolean | null;
+    reference_timestamp?: string | null;
+  };
 }
 
 export interface MitigationRecommendation {
@@ -133,6 +149,17 @@ export interface SensorRuntime {
   forecast_status?: string;
   latest_state_timestamp?: string | null;
   source_status?: string;
+  source_priorities?: SourcePriority[];
+  source_attribution?: {
+    schema_version?: string | null;
+    status?: string;
+    sensor_id?: string;
+    source_count?: number;
+    last_event_timestamp?: string | null;
+    last_received_at?: string | null;
+    source_priorities?: SourcePriority[];
+  };
+  mitigation?: { simulation_only?: boolean; recommendations?: MitigationRecommendation[] };
   forecast?: {
     forecast?: ForecastRow[];
     threshold?: number;
@@ -176,6 +203,13 @@ export interface SensorSummary {
   lifecycle_state?: string;
   disabled?: boolean;
   runtime?: SensorRuntime;
+}
+
+export interface SensorForecastResponse {
+  sensor_id: string;
+  status: string;
+  forecast_ready: boolean;
+  forecast?: SensorRuntime["forecast"];
 }
 
 export interface FleetHealth {

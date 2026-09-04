@@ -174,10 +174,10 @@ def test_agent_identity_and_production_transport_policy(tmp_path: Path) -> None:
         AgentConfig(server_url="central.example:8000").validate()
 
 
-def test_compose_declares_controlled_registry_volume() -> None:
+def test_compose_declares_host_backed_registry_mount() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
-    assert compose["services"]["backend"]["volumes"][-1] == "sentinel_registry:/app/results/sensors"
-    assert compose["volumes"]["sentinel_registry"]["name"] == "${SENTINEL_REGISTRY_VOLUME:-sentinel-registry}"
+    assert compose["services"]["backend"]["volumes"][-1] == "./results/sensors:/app/results/sensors"
+    assert "volumes" not in compose or "sentinel_registry" not in compose["volumes"]
 
 
 def test_frontend_enrollment_does_not_call_admin_endpoint_or_embed_admin_token() -> None:
