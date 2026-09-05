@@ -1,11 +1,11 @@
 # Release Candidate Checklist
 
-Phase T validation date: 2026-09-04; superseded by Phase X on 2026-09-04
+Phase T validation date: 2026-09-04; superseded by Phase AB on 2026-09-04
 Legend: each item is marked **PASS**, **FAIL**, **NOT VERIFIED**, or **NOT APPLICABLE**; a passing local check is not a staging claim.
 
-> **Current-status banner:** Phase X is the authoritative current validation
+> **Current-status banner:** Phase AB is the authoritative current validation
 > overlay. The Phase Q/R/T items below are retained as historical evidence and
-> must not be read as the final status when they conflict with Phase X.
+> must not be read as the final status when they conflict with Phase AB.
 
 ## Core release checks
 
@@ -53,10 +53,10 @@ Legend: each item is marked **PASS**, **FAIL**, **NOT VERIFIED**, or **NOT APPLI
 - TLS was validated only through an isolated localhost Nginx proxy and temporary private CA.
 - Multi-host, five-sensor behavior, active outage recovery, and a 30-minute resource soak remain unverified.
 - Phase S subsequently reached the required contiguous history and produced the
-  existing five-row forecast. This current release-candidate evidence is
+  existing five-row forecast. This historical release-candidate evidence is
   consolidated in the Phase T report below.
 
-Final classification: **OPEN-SOURCE RELEASE READY**.
+Historical Phase T classification: **OPEN-SOURCE RELEASE READY**.
 
 This classification does not claim `STAGING READY` or production readiness; the
 environment-validation limitations above remain explicit.
@@ -100,11 +100,11 @@ The Phase S report is [`PHASE_S_REMOTE_FORECAST_AND_AGENT_STOP_REPORT.md`](PHASE
 The final classification remains **OPEN-SOURCE RELEASE READY**; `STAGING READY`
 is not claimed.
 
-## Phase T public release-candidate overlay
+## Historical Phase T public release-candidate overlay
 
-Validation date: 2026-09-04. This is the current release gate after the Phase S
-real forecast and Windows stop fix. Historical Phase Q/R entries above remain
-historical records; this overlay is authoritative for the current candidate.
+Validation date: 2026-09-04. This records the Phase T candidate after the Phase
+S real forecast and Windows stop fix. The Phase Q/R/T entries above and below
+are historical records; Phase AB is authoritative for the current candidate.
 
 - [x] PASS — README, architecture, first-time operator path, and customer-path boundary are explicit.
 - [x] PASS — Primary dashboard journey verified: Overview, Sensors, Add Sensor, Sensor Detail, Forecast, Sources, and Mitigation.
@@ -119,8 +119,8 @@ historical records; this overlay is authoritative for the current candidate.
 - [ ] NOT VERIFIED — TruffleHog scan; executable was not installed in this environment.
 - [ ] NOT VERIFIED — Second physical host, five-sensor run, 30-minute soak/resource series, expired certificate, and public ingress.
 
-Current classification: **CONDITIONAL CANDIDATE — PUBLICATION PENDING PROVENANCE RECONCILIATION**.
-Phase X is the current authority; this does not claim external validation or
+Current classification: **PUBLIC LAUNCH READY — EXTERNAL VALIDATION PENDING**.
+Phase AB is the current authority; this does not claim external validation or
 production readiness.
 
-The complete evidence is [`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).
+The complete current evidence is [`PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).

@@ -144,15 +144,18 @@ CA; it never posts telemetry. Record future live evidence in
 [`PHASE_R_REMOTE_FORECAST_REPORT.md`](PHASE_R_REMOTE_FORECAST_REPORT.md) without
 claiming staging or production readiness from local Compose results.
 
-## Phase S and Phase T current record
+## Historical Phase S and Phase T record
 
 On 2026-09-04, the actual Windows Wi-Fi/Npcap agent reached ten contiguous
 accepted states through the isolated Nginx HTTPS proxy. The existing LSTM
 returned five forecast rows, a rolling update was observed, the dashboard
 showed the selected sensor as `ONLINE`, `FRESH`, `FORECAST READY`, and `10 / 10`,
 and `sentinel-agent stop` terminated the foreground process cleanly. The
-current release-candidate evidence, including package, browser, Docker,
+historical release-candidate evidence, including package, browser, Docker,
 customer-path, security, and documentation checks, is consolidated in
 [`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).
 Physical multi-host/five-sensor deployment, 30-minute soak, expired
 certificate, public ingress, and TruffleHog remain **NOT VERIFIED**.
+
+The current Phase AB release-gate and publication status is recorded in
+[`PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).

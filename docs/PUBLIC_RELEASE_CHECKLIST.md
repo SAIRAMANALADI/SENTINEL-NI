@@ -7,14 +7,15 @@ Legend: **PASS** is verified in the stated environment; **NOT VERIFIED** is an
 unavailable or unexercised environment gate; **N/A** is outside this release
 scope. The owner must review this checklist before publishing.
 
-**Current gate:** Phase Z is the current coordinator record. This checklist is
+**Current gate:** Phase AB is the current coordinator record. This checklist is
 historical/local evidence only; publication is pending provenance reconciliation
-and external validation. See [`PHASE_Z_EXTERNAL_VALIDATION_REPORT.md`](PHASE_Z_EXTERNAL_VALIDATION_REPORT.md).
+and external validation. See [`PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).
 
 ## REPOSITORY
 
 - **PASS** — README, LICENSE, SECURITY.md, CONTRIBUTING.md, and CHANGELOG.md exist.
-- **PASS** — Public release manifest, release notes, Phase U report, and Phase V report exist.
+- **PASS** — Public release manifest, release notes, Phase AB report, and
+  final publication runbook exist; earlier phase reports remain historical.
 - **PASS** — Architecture states that Sentinel observes out-of-band and is not a reverse proxy.
 - **PASS** — Existing worktree and tags were inspected; no commit, tag mutation, or push was made. Existing `v0.1.0` points to an earlier commit.
 
@@ -96,5 +97,5 @@ and external validation. See [`PHASE_Z_EXTERNAL_VALIDATION_REPORT.md`](PHASE_Z_E
 ## PUBLICATION DECISION
 
 **PUBLIC LAUNCH READY — EXTERNAL VALIDATION PENDING**.
-The owner must complete the Phase Z provenance and external-validation gates
+The owner must complete the Phase AB provenance and external-validation gates
 before publishing the source or artifacts.

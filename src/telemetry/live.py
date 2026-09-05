@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 from queue import Empty, Full, Queue
-from threading import Lock
+from threading import Lock, RLock
 from collections import Counter
 from typing import Any, Callable
 
@@ -192,7 +192,7 @@ class LiveTelemetryAdapter(TelemetryAdapter):
         self._sniffer_factory = sniffer_factory
         self._event_callback = event_callback
         self._queue: Queue[dict[str, Any]] = Queue(maxsize=queue_size)
-        self._lock = Lock()
+        self._lock = RLock()
         self._sniffer: Any | None = None
         self._started_at: datetime | None = None
         self._last_event_at: datetime | None = None
@@ -257,55 +257,55 @@ class LiveTelemetryAdapter(TelemetryAdapter):
                 return
             if not self._backend_available:
                 raise LiveTelemetryUnavailable(self._error or "capture backend unavailable")
-        try:
-            if self._sniffer_factory is None:
-                scapy = _load_scapy()
-                if os.name == "nt" and not bool(getattr(scapy.conf, "use_pcap", False)):
-                    message = "Npcap/libpcap is not available to Scapy on this Windows host"
-                    self._set_error(message, LIVE_UNAVAILABLE)
-                    raise LiveTelemetryUnavailable(message)
-                available = {row["name"] for row in discover_capture_interfaces()}
-                if self.interface not in available:
-                    raise LiveTelemetryUnavailable(f"capture interface not found: {self.interface}")
-                factory = scapy.AsyncSniffer
-            else:
-                factory = self._sniffer_factory
-            options: dict[str, Any] = {"iface": self.interface, "prn": self._on_packet, "store": False}
-            if self.capture_filter:
-                options["filter"] = self.capture_filter
-            self._sniffer = factory(**options)
-            self._sniffer.start()
-        except PermissionError as exc:
-            self._set_error(str(exc), LIVE_PERMISSION_DENIED)
-            raise LiveTelemetryPermissionDenied(str(exc)) from exc
-        except LiveTelemetryError:
-            raise
-        except OSError as exc:
-            message = str(exc)
-            state = LIVE_PERMISSION_DENIED if "permission" in message.lower() or "access" in message.lower() else LIVE_ERROR
-            self._set_error(message, state)
-            if state == LIVE_PERMISSION_DENIED:
-                raise LiveTelemetryPermissionDenied(message) from exc
-            raise LiveTelemetryError(message) from exc
-        except Exception as exc:
-            self._set_error(str(exc), LIVE_ERROR)
-            raise LiveTelemetryError(str(exc)) from exc
-        with self._lock:
+            try:
+                if self._sniffer_factory is None:
+                    scapy = _load_scapy()
+                    if os.name == "nt" and not bool(getattr(scapy.conf, "use_pcap", False)):
+                        message = "Npcap/libpcap is not available to Scapy on this Windows host"
+                        self._set_error(message, LIVE_UNAVAILABLE)
+                        raise LiveTelemetryUnavailable(message)
+                    available = {row["name"] for row in discover_capture_interfaces()}
+                    if self.interface not in available:
+                        raise LiveTelemetryUnavailable(f"capture interface not found: {self.interface}")
+                    factory = scapy.AsyncSniffer
+                else:
+                    factory = self._sniffer_factory
+                options: dict[str, Any] = {"iface": self.interface, "prn": self._on_packet, "store": False}
+                if self.capture_filter:
+                    options["filter"] = self.capture_filter
+                sniffer = factory(**options)
+                sniffer.start()
+                self._sniffer = sniffer
+            except PermissionError as exc:
+                self._set_error(str(exc), LIVE_PERMISSION_DENIED)
+                raise LiveTelemetryPermissionDenied(str(exc)) from exc
+            except LiveTelemetryError:
+                raise
+            except OSError as exc:
+                message = str(exc)
+                state = LIVE_PERMISSION_DENIED if "permission" in message.lower() or "access" in message.lower() else LIVE_ERROR
+                self._set_error(message, state)
+                if state == LIVE_PERMISSION_DENIED:
+                    raise LiveTelemetryPermissionDenied(message) from exc
+                raise LiveTelemetryError(message) from exc
+            except Exception as exc:
+                self._set_error(str(exc), LIVE_ERROR)
+                raise LiveTelemetryError(str(exc)) from exc
             self._started_at = datetime.now(timezone.utc)
             self._last_event_at = None
             self._error = None
             self._state = LIVE_RUNNING
 
     def stop(self) -> None:
-        sniffer = self._sniffer
-        self._sniffer = None
-        if sniffer is not None:
-            try:
-                sniffer.stop()
-            except Exception as exc:  # pragma: no cover - backend-specific failure
-                self._set_error(str(exc), LIVE_ERROR)
-                return
         with self._lock:
+            sniffer = self._sniffer
+            self._sniffer = None
+            if sniffer is not None:
+                try:
+                    sniffer.stop()
+                except Exception as exc:  # pragma: no cover - backend-specific failure
+                    self._set_error(str(exc), LIVE_ERROR)
+                    return
             if self._state != LIVE_UNAVAILABLE:
                 self._state = LIVE_STOPPED
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import Header, HTTPException, Request, status
@@ -62,3 +63,16 @@ def require_telemetry_sensor(
             detail={"code": "INVALID_SENSOR_CREDENTIAL", "message": "sensor authentication failed"},
             headers={"WWW-Authenticate": "Sensor"},
         ) from exc
+
+
+async def require_locked_telemetry_sensor(
+    request: Request,
+    body: RemoteTelemetryBatch,
+    sensor_token: Annotated[str | None, Header(alias=SENSOR_TOKEN_HEADER)] = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Hold the sensor transaction lock for the complete telemetry request."""
+
+    sensor = require_telemetry_sensor(request, body, sensor_token)
+    registry: SensorRegistry = request.app.state.runtime.sensor_registry
+    with registry.telemetry_transaction(str(sensor["sensor_id"])):
+        yield sensor

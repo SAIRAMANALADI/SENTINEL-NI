@@ -14,7 +14,8 @@ The prototype is an offline forecasting system. Training and dataset constructio
 | Operating policy | Raw Forecast Scores and policy configuration | Warning/no-warning decisions | Apply validation-selected mode thresholds without retuning on final test | `src/evaluation/operating_policy.py`, `configs/operating_policy.yaml` | Scores are not calibrated probabilities; alert rates are state-rate estimates |
 | Explainability | One standardized input sequence and frozen model | Feature-position and temporal sensitivity | Show which masked inputs changed the model score | `src/evaluation/feature_ablation.py`, `src/forecasting/explanation.py` | Sensitivity is not causal attribution |
 | Offline inference API | Validated DataFrame with 10 states, 17 features, timestamps, and capture day | JSON-serializable forecast, policy, explanation, and timing result | Provide one stable service boundary for CLI and UI | `src/forecasting/inference.py` | Requires the approved local preprocessing artifact and K=5 checkpoint |
-| Streamlit dashboard | Demo/uploaded compatible sequence | Human-readable forecast, trajectory, warning, explanation, and technical details | Present the real inference result for a judge/demo workflow | `app/streamlit_app.py` | It is an offline prototype, not a production live-monitoring service |
+| Next.js dashboard | Authenticated central API snapshots and controls | Overview, sensors, forecast, sources, mitigation, and operational health | Primary operator and end-user workflow | `frontend/` | Public ingress/TLS and production capacity remain unverified |
+| Streamlit fallback | Demo/uploaded compatible sequence or live API snapshot | Human-readable forecast, trajectory, warning, explanation, and technical details | Retained loopback/private demo workflow | `app/streamlit_app.py` | Not the primary authenticated dashboard or a production live-monitoring service |
 
 ## Frozen contract
 

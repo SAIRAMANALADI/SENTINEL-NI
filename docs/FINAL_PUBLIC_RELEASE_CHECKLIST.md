@@ -2,9 +2,9 @@
 
 Validation date: 2026-09-04
 
-**Current gate:** Phase Z supersedes this historical checklist. Treat the
-working tree as unpublished and externally unvalidated until the Phase Z report
-and approved source provenance gates are complete.
+**Current gate:** Phase AB is the current coordinator record. Treat this
+candidate as unpublished and externally unvalidated until the Phase AB report
+and approved external-validation gates are complete.
 
 Legend: **PASS** means verified in the stated environment; **NOT VERIFIED**
 means the gate was not available or not exercised; **N/A** means the item is
@@ -40,8 +40,9 @@ outside this release scope. No item below is a production-capacity claim.
 
 ## CODE
 
-- **PASS** — Full Python suite: `323 passed, 2 warnings` (Phase Z rerun).
-- **PASS** — Focused security/HTTPS/remote-agent suite: `30 passed, 2 warnings`.
+- **PASS** — Full Python suite and Phase AB concurrency regressions; the exact
+  current count is recorded in the Phase AB report.
+- **PASS** — Focused security/HTTPS/remote-agent suite: `28 passed, 2 warnings`.
 - **PASS** — Frontend typecheck.
 - **PASS** — Frontend production build.
 - **PASS** — `scripts/release_audit.py`.
@@ -85,7 +86,7 @@ outside this release scope. No item below is a production-capacity claim.
 
 ## DECISION
 
-**OPEN-SOURCE RELEASE READY**. The repository may be published as an open-source
-project with the limitations in the manifest and Phase U report attached. This
-does not claim staging readiness, production capacity, or universal platform
-support.
+**PUBLIC LAUNCH READY — EXTERNAL VALIDATION PENDING**. The repository is
+internally ready for the documented external-validation handoff, subject to
+the limitations in the manifest and Phase AB report. This does not claim
+staging readiness, production capacity, or universal platform support.

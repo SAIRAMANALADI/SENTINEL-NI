@@ -17,15 +17,27 @@ dependency resolution.
 
 Verify with GET /api/v1/health and GET /api/v1/ready.
 
-## Start dashboard
+## Start the primary dashboard
 
 In another terminal:
+
+    Set-Location frontend
+    npm ci
+    npm run dev
+
+Open `http://127.0.0.1:3000/`. The authenticated Next.js dashboard is the
+primary operator and end-user surface.
+
+## Legacy Streamlit fallback
+
+For offline/demo workflows only, start the retained Streamlit fallback in
+another terminal:
 
     $env:SIH_API_URL = "http://127.0.0.1:8000"
     python -m streamlit run app\streamlit_app.py
 
-Select Full Integrated Demo. The dashboard calls the backend demo endpoint;
-the backend composes the existing engine.
+Select Full Integrated Demo. This fallback calls the backend demo endpoint; it
+is not the public authenticated dashboard and should remain loopback/private.
 
 ## Docker Compose
 
@@ -110,7 +122,7 @@ the agent must run on the monitored host.
 
 The following section records the older Phase I boundary and is retained for
 historical traceability. It is superseded for the current candidate by
-[`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).
+[`PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).
 
 At Phase I, the repository's deployment validation was **development-only**:
 
@@ -165,10 +177,12 @@ five-sensor behavior, expired-certificate handling, a 30-minute soak, and live
 capacity remain unverified. See
 [`PHASE_R_REMOTE_FORECAST_REPORT.md`](PHASE_R_REMOTE_FORECAST_REPORT.md).
 
-## Phase T current release-candidate record
+## Historical Phase T release-candidate record
 
-The current candidate also validates local Compose health/restart/down-up,
+The Phase T candidate validated local Compose health/restart/down-up,
 browser smoke, clean wheel installation, release-audit links, and the real
 Windows remote path reaching contiguous `L=10` and existing `K=5` inference.
-The complete evidence and remaining unverified gates are in
+The complete historical evidence and remaining unverified gates are in
 [`PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md`](PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md).
+The current gate is maintained in
+[`PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).

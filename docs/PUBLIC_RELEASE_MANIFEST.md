@@ -7,18 +7,18 @@ It describes the open-source code boundary and the evidence available on the
 validation host. It is not a staging-capacity, production-certification, or
 universal-platform-support claim.
 
-**Current gate:** Phase Z is the current coordinator record. This repository
-is a working-tree release candidate, not a published or externally validated
-release. Publication remains blocked until the owner selects an approved
-source commit, resolves the existing `v0.1.0` tag mapping, rebuilds artifacts
-from that commit, and completes the required external validation.
+**Current gate:** Phase AB is the current coordinator record. This repository
+contains base commit `db8886fa2d25867b34d3d658901f32ef16e638f8` plus the
+uncommitted Phase AB working-tree candidate, which is not a published or
+externally validated release. Publication remains
+pending the required external validation and human release approval.
 
 ## Release identity
 
 | Item | Value | Status |
 | --- | --- | --- |
 | Project release candidate | `v0.1.0` | **IMPLEMENTED / TESTED — NOT PUBLISHED** |
-| Candidate source revision | `41dbec11a433370e28aa083274202b1f92ddd5c5` | **WORKING-TREE EVIDENCE; TAG MAPPING PENDING** |
+| Candidate source revision | `db8886fa2d25867b34d3d658901f32ef16e638f8` + Phase AB working-tree delta | **UNCOMMITTED CANDIDATE; TAG MAPPING PENDING** |
 | Python package | `sih26-26153==0.1.0` | **IMPLEMENTED / TESTED** |
 | Agent CLI | `0.2.0` | **IMPLEMENTED / TESTED** |
 | Telemetry protocol/schema | protocol `1`, schema `1` | **IMPLEMENTED / TESTED** |
@@ -64,7 +64,8 @@ and non-ambiguous tag mapping.
 - Mitigation remains `simulation_only=true` and recommendation-only.
 
 No unintended changes were found in model weights, inference, scaler, feature
-schema, target, `L=10`, `K=5`, or threshold `0.19` during the Phase U gate.
+schema, target, `L=10`, `K=5`, or threshold `0.19` during the release gates;
+the Phase AB protected-path review remains the current record.
 
 ## Environment matrix
 
@@ -164,5 +165,5 @@ The following remain outside the evidence available for this release gate:
 This classification means the public code/package/docs boundary is coherent,
 the available release checks pass, and limitations are explicit. It does not
 promote the repository to `STAGING READY` or `PRODUCTION READY WITH LIMITATIONS`.
-See the [Phase Z report](PHASE_Z_EXTERNAL_VALIDATION_REPORT.md) and
+See the [Phase AB report](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md) and
 [final checklist](FINAL_PUBLIC_RELEASE_CHECKLIST.md) for the complete gate.

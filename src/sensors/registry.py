@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -11,6 +12,7 @@ import secrets
 from threading import RLock
 import tempfile
 import uuid
+from collections.abc import Iterator
 from typing import Any, Callable
 
 from src.telemetry.contracts import REMOTE_AGENT_CAPABILITIES, SourceType
@@ -324,6 +326,14 @@ class SensorRegistry:
             if sequence <= last_sequence:
                 raise SensorSequenceConflict("telemetry sequence is out of order or conflicts with an accepted batch")
             return "accepted"
+
+    @contextmanager
+    def telemetry_transaction(self, sensor_id: str) -> Iterator[None]:
+        """Serialize telemetry admission, runtime processing, and registry commit."""
+
+        with self._lock:
+            self._sensor(sensor_id)
+            yield
 
     def accept_heartbeat(self, sensor_id: str, *, buffered_item_count: int, agent_version: str | None = None) -> None:
         self.accept_heartbeat_details(

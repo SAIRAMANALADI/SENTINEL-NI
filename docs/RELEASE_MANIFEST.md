@@ -6,9 +6,9 @@ for compatibility with links from earlier release phases; versioned serving
 contracts below are retained as historical reference and must agree with the
 canonical manifest.
 
-**Current gate:** Phase Z is the current coordinator record. This working-tree
-candidate is not published or externally validated; publication remains
-pending approved-commit/tag reconciliation and the external validation gates.
+**Current gate:** Phase AB is the current coordinator record. This candidate
+working tree is not published or externally validated; publication remains
+pending the external validation gates and human release approval.
 
 ## Identity
 
@@ -48,10 +48,10 @@ evidence files are included where required for reproducible validation.
 
 ## Current evidence boundary
 
-The current decision is **CONDITIONAL CANDIDATE — PUBLICATION PENDING PROVENANCE RECONCILIATION**. Python, frontend,
-package, dependency, contract, local Docker, browser, customer-path, and
-isolated TLS checks pass. Physical multi-host/five-sensor operation, a
-30-minute soak/resource series, expired certificates, public ingress, and
-TruffleHog remain **NOT VERIFIED**. See the [Public Release Manifest](PUBLIC_RELEASE_MANIFEST.md)
-and [Phase Z External Validation Report](PHASE_Z_EXTERNAL_VALIDATION_REPORT.md)
-for the authoritative status.
+The current decision is **PUBLIC LAUNCH READY — EXTERNAL VALIDATION PENDING**.
+Python, frontend, package, dependency, contract, local Docker, browser,
+customer-path, and isolated TLS checks pass. Physical multi-host/five-sensor
+operation, a 30-minute soak/resource series, expired certificates, public
+ingress, and TruffleHog remain **NOT VERIFIED**. See the [Public Release
+Manifest](PUBLIC_RELEASE_MANIFEST.md) and [Phase AB Final Release Gate
+Report](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md) for the authoritative status.

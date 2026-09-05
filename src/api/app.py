@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from src.api.auth import require_role
-from src.api.sensors import require_sensor, require_telemetry_sensor
+from src.api.sensors import require_locked_telemetry_sensor, require_sensor
 from src.api.models import (
     ErrorResponse,
     ForecastRequest,
@@ -723,7 +723,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ingest_remote_telemetry(
         request: Request,
         body: RemoteTelemetryBatch,
-        sensor: dict[str, Any] = Depends(require_telemetry_sensor),
+        sensor: dict[str, Any] = Depends(require_locked_telemetry_sensor),
     ) -> dict[str, Any]:
         sensor_id = str(sensor["sensor_id"])
         if body.sensor_id != sensor_id:

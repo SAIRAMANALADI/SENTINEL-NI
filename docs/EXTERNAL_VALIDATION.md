@@ -8,6 +8,14 @@ For the shortest executable path, use
 [`EXTERNAL_VALIDATION_QUICKSTART.md`](EXTERNAL_VALIDATION_QUICKSTART.md) and
 record results in [`EXTERNAL_VALIDATION_RESULT_TEMPLATE.md`](EXTERNAL_VALIDATION_RESULT_TEMPLATE.md).
 
+## DO NOT USE DEVELOPMENT MACHINE
+
+The validator must use an unrelated machine, network, VM, or independently
+controlled host. Do not count another process, browser, user, replay, mock
+telemetry, or container on the implementation machine as independent
+validation. Record the exact candidate commit or artifact SHA256 before
+testing and keep the candidate unchanged throughout the run.
+
 ## Before reporting
 
 Record the project release (`0.1.0`), agent version (`0.2.0`), OS, Python

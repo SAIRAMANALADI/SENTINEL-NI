@@ -7,6 +7,14 @@ Never record tokens, private keys, PCAP contents, customer payloads, or private
 filesystem paths. Sentinel observes out of band; customer requests continue to
 reach the customer application directly.
 
+## DO NOT USE DEVELOPMENT MACHINE
+
+This procedure is for an unrelated validator. Do not run it on the machine
+that created the candidate, or count a second process, browser, user, replay,
+mock telemetry stream, or container on that machine as independent validation.
+Record the exact candidate commit or artifact SHA256 before starting and do not
+modify it during the run.
+
 ## Prerequisites
 
 - A clean checkout and Python 3.14.

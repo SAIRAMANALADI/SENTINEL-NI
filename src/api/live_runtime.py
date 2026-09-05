@@ -146,6 +146,7 @@ class LiveRuntimeStore:
             self._refresh_source_outputs()
 
         for sequence in pending_sequences:
+            reference_timestamp = pd.Timestamp(sequence["timestamp"].iloc[-1]).isoformat()
             try:
                 result = dict(self._inference_fn(sequence))
             except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
@@ -153,6 +154,10 @@ class LiveRuntimeStore:
                     self._last_error = f"live inference: {exc}"
                 continue
             with self._lock:
+                latest_reference = str((self._last_forecast or {}).get("reference_timestamp") or "")
+                if latest_reference and reference_timestamp < latest_reference:
+                    continue
+                result.setdefault("reference_timestamp", reference_timestamp)
                 self._last_forecast = result
                 self._forecast_update_count += 1
                 self._startup_stage_timestamps.setdefault("first_inference", datetime.now(timezone.utc).isoformat())

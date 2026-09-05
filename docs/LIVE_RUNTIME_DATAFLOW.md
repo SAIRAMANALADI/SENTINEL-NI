@@ -13,7 +13,8 @@ LiveTelemetryAdapter
        -> predict_network_state_sequence (existing frozen path)
        -> source prioritization + recommendation-only mitigation
     -> GET /api/v1/live
-    -> Streamlit live fragment
+    -> Authenticated Next.js dashboard
+       (legacy Streamlit fallback is loopback/private)
 ```
 
 ## Ownership
@@ -29,8 +30,11 @@ LiveTelemetryAdapter
 - `src/forecasting/inference.py` remains the only model invocation path.
 - `src/api/app.py` exposes the read-only `/api/v1/live` snapshot and retains
   the existing start/stop telemetry controls.
-- `app/streamlit_app.py` reads `/api/v1/live`; it does not load the model,
-  build states, or recompute forecasts.
+- `frontend/` reads the authenticated API, including `/api/v1/live`; it does
+  not load the model, build states, or recompute forecasts.
+- `app/streamlit_app.py` is a retained loopback/private demo fallback. It also
+  reads `/api/v1/live` and does not load the model, build states, or recompute
+  forecasts.
 
 ## State and restart behavior
 

@@ -113,7 +113,9 @@ arbitrary host packet capture from inside a container.
     docker compose up -d --build
 
 Open the primary dashboard at [http://localhost:3000](http://localhost:3000).
-The central API listens on port 8000; the Streamlit fallback listens on 8501.
+The central API listens on port 8000. The legacy Streamlit fallback, when
+needed for offline/demo workflows, listens on port 8501 and is not the public
+end-user dashboard.
 
     docker compose down
 
@@ -323,13 +325,14 @@ for the exact evidence and remaining deployment work.
 - [Release Notes](docs/RELEASE_NOTES.md)
 - [Public Release Manifest](docs/PUBLIC_RELEASE_MANIFEST.md)
 - [Final Public Release Checklist](docs/FINAL_PUBLIC_RELEASE_CHECKLIST.md)
-- [Phase U Final Public Release Report](docs/PHASE_U_FINAL_PUBLIC_RELEASE_REPORT.md)
+- [Phase AB Final Release Gate Report](docs/PHASE_AB_FINAL_RELEASE_GATE_REPORT.md)
+- [Final Public Release Runbook](docs/FINAL_PUBLIC_RELEASE_RUNBOOK.md)
 - [Public Release Checklist](docs/PUBLIC_RELEASE_CHECKLIST.md)
 - [External Validation](docs/EXTERNAL_VALIDATION.md)
 - [Issue Triage](docs/ISSUE_TRIAGE.md)
 - [Release Artifact Checksums](docs/RELEASE_ARTIFACT_SHA256SUMS.txt)
 - [Subagent Release Review](docs/SUBAGENT_RELEASE_REVIEW.md)
-- [Phase T Public Release Candidate Report](docs/PHASE_T_PUBLIC_RELEASE_CANDIDATE_REPORT.md)
+- Historical phase reports remain available under `docs/` for traceability.
 
 ## Limitations and roadmap
 

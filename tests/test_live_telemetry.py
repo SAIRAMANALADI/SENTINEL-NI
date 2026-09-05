@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import threading
+import time
 
 import pytest
 
@@ -99,6 +102,27 @@ def test_start_read_stop_and_status(monkeypatch: pytest.MonkeyPatch) -> None:
     assert adapter.read_event()["timestamp"] == "2026-01-01T00:00:00+00:00"
     adapter.stop()
     assert adapter.status()["status"] == live.LIVE_STOPPED
+
+
+def test_concurrent_start_creates_only_one_sniffer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "packet_to_event", lambda packet: {"timestamp": "2026-01-01T00:00:00+00:00"})
+    created: list[FakeSniffer] = []
+    created_lock = threading.Lock()
+
+    def slow_factory(**kwargs: object) -> FakeSniffer:
+        time.sleep(0.05)
+        sniffer = FakeSniffer(**kwargs)
+        with created_lock:
+            created.append(sniffer)
+        return sniffer
+
+    adapter = live.LiveTelemetryAdapter("test-interface", sniffer_factory=slow_factory)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(lambda _: adapter.start(), range(2))) == [None, None]
+
+    assert len(created) == 1
+    adapter.stop()
+    assert created[0].stopped is True
 
 
 def test_missing_interface_is_unavailable() -> None:

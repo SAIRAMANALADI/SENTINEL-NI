@@ -2,16 +2,16 @@
 
 This is the v0.1.0 public release candidate record. Phase V validation was
 performed in the shared Windows development environment. The
-release classification is **CONDITIONAL CANDIDATE — PUBLICATION PENDING
-PROVENANCE RECONCILIATION**; it is not a staging or production-capacity claim.
+release classification is **PUBLIC LAUNCH READY — EXTERNAL VALIDATION
+PENDING**; it is not a staging or production-capacity claim.
 
-The current gate is recorded in the [Phase Z external validation report](PHASE_Z_EXTERNAL_VALIDATION_REPORT.md).
+The current gate is recorded in the [Phase AB final release gate report](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md).
 
 The canonical release contract is the
-[Public Release Manifest](PUBLIC_RELEASE_MANIFEST.md). The complete final gate
-is recorded in the [Phase U Final Public Release Report](PHASE_U_FINAL_PUBLIC_RELEASE_REPORT.md)
-and [Phase V Public Release Report](PHASE_V_PUBLIC_RELEASE_REPORT.md). Artifact
-hashes are in [RELEASE_ARTIFACT_SHA256SUMS.txt](RELEASE_ARTIFACT_SHA256SUMS.txt).
+[Public Release Manifest](PUBLIC_RELEASE_MANIFEST.md). The complete current
+gate is recorded in the [Phase AB Final Release Gate Report](PHASE_AB_FINAL_RELEASE_GATE_REPORT.md);
+earlier phase reports remain historical evidence. Artifact hashes are in
+[RELEASE_ARTIFACT_SHA256SUMS.txt](RELEASE_ARTIFACT_SHA256SUMS.txt).
 
 ## Added
 
@@ -51,7 +51,8 @@ hashes are in [RELEASE_ARTIFACT_SHA256SUMS.txt](RELEASE_ARTIFACT_SHA256SUMS.txt)
 ## Validation
 
 - Python regression, sensor, security, telemetry, API, remote-agent, and
-  dashboard authorization contracts (`323 passed`, `2 warnings`).
+  dashboard authorization contracts; the current count is recorded in the
+  Phase AB report.
 - Frontend typecheck, production build, and local runtime smoke of the primary
   operator journey; independent browser validation remains pending.
 - Wheel/sdist build, clean non-editable wheel installation, CLI command smoke,
@@ -66,8 +67,8 @@ hashes are in [RELEASE_ARTIFACT_SHA256SUMS.txt](RELEASE_ARTIFACT_SHA256SUMS.txt)
 - Independent customer HTTP service availability while Sentinel was stopped.
 
 Exact current results are recorded in
-`docs/PHASE_Y_RELEASE_PROVENANCE_REPORT.md`; Phase V, U, and earlier phase
-reports remain historical records.
+`docs/PHASE_AB_FINAL_RELEASE_GATE_REPORT.md`; earlier phase reports remain
+historical records.
 
 ## Known Limitations
 

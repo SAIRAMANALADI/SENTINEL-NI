@@ -6,7 +6,10 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
@@ -252,6 +255,59 @@ def test_three_remote_sensors_keep_health_and_state_identity_under_concurrent_in
     assert [item["runtime"]["state_count"] for item in details] == [2, 2, 2]
     assert {item["sensor_id"] for item in details} == {sensor_id for sensor_id, _ in credentials}
     assert all(item["runtime"]["sensor_id"] == item["sensor_id"] for item in details)
+
+
+def test_same_sensor_telemetry_transaction_keeps_runtime_and_registry_consistent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(_settings(tmp_path, rate_limit=1))
+    client = TestClient(app)
+    sensor_id, token = _register(client)
+    original_ingest = app.state.runtime.sensor_manager.ingest
+    first_ingest_started = threading.Event()
+    release_first_ingest = threading.Event()
+    ingest_calls = 0
+
+    def gated_ingest(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal ingest_calls
+        ingest_calls += 1
+        if ingest_calls == 1:
+            first_ingest_started.set()
+            assert release_first_ingest.wait(timeout=5)
+        return original_ingest(*args, **kwargs)
+
+    monkeypatch.setattr(app.state.runtime.sensor_manager, "ingest", gated_ingest)
+
+    def send(sequence: int) -> int:
+        state_timestamp = f"2018-02-22T01:00:{sequence:02d}+00:00"
+        response = client.post(
+            "/api/v1/telemetry",
+            json={
+                "schema_version": "1",
+                "sensor_id": sensor_id,
+                "sequence": sequence,
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+                "states": [_state(state_timestamp)],
+            },
+            headers={"X-Sentinel-Sensor-Token": token},
+        )
+        return response.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(send, 1)
+        assert first_ingest_started.wait(timeout=5)
+        second = pool.submit(send, 2)
+        time.sleep(0.1)
+        assert ingest_calls == 1
+        release_first_ingest.set()
+        assert first.result() == 200
+        assert second.result() == 429
+
+    details = client.get(
+        f"/api/v1/sensors/{sensor_id}", headers={"Authorization": "Bearer viewer-test"}
+    ).json()
+    assert details["last_sequence"] == 1
+    assert details["runtime"]["state_count"] == 1
 
 
 def test_fleet_endpoint_is_compact_and_reports_actual_counts(tmp_path: Path) -> None:

@@ -85,6 +85,36 @@ def test_tenth_and_eleventh_states_produce_rolling_forecasts() -> None:
     assert all(row["simulation_only"] is True for row in snapshot["mitigation"]["recommendations"])
 
 
+def test_older_inference_cannot_overwrite_newer_forecast() -> None:
+    old_inference_started = threading.Event()
+    release_old_inference = threading.Event()
+
+    def out_of_order_inference(sequence: pd.DataFrame) -> dict[str, object]:
+        reference = pd.Timestamp(sequence["timestamp"].iloc[-1]).isoformat()
+        if reference == "2026-08-25T12:01:30+00:00":
+            old_inference_started.set()
+            assert release_old_inference.wait(timeout=5)
+        return _fake_inference(sequence)
+
+    store = LiveRuntimeStore(inference_fn=out_of_order_inference)
+
+    def feed_first_window() -> None:
+        for index in range(10):
+            store.ingest_event(_packet(index))
+
+    worker = threading.Thread(target=feed_first_window)
+    worker.start()
+    assert old_inference_started.wait(timeout=5)
+    store.ingest_event(_packet(10))
+    release_old_inference.set()
+    worker.join(timeout=5)
+
+    snapshot = store.snapshot(_running_status())
+    assert not worker.is_alive()
+    assert snapshot["forecast"]["reference_timestamp"] == "2026-08-25T12:01:40+00:00"
+    assert snapshot["forecast_update_count"] == 1
+
+
 def test_stop_marks_last_forecast_stale_without_deleting_it() -> None:
     store = LiveRuntimeStore(inference_fn=_fake_inference)
     for index in range(10):
